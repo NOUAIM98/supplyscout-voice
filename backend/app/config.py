@@ -16,7 +16,9 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     database_url: str | None = None
-    call_provider_mode: Literal["fake"] = "fake"
+    call_provider_mode: Literal["fake", "calle"] = "fake"
+    calle_api_key: str | None = None
+    calle_base_url: str = "https://api.heycall-e.com"
 
 
 settings = Settings()

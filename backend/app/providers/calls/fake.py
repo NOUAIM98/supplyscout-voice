@@ -44,7 +44,11 @@ class FakeCallProvider:
         sourcing_request: SourcingRequest,
         selected_quote: SupplierQuote,
         supplier: Supplier,
+        *,
+        approved: bool = False,
     ) -> dict[str, str | None]:
+        if not approved:
+            raise PermissionError("Explicit reservation approval is required")
         if selected_quote.sourcing_request_id != sourcing_request.id:
             raise ValueError("Selected quote does not belong to the sourcing request")
         if selected_quote.supplier_id != supplier.id:
@@ -106,6 +110,7 @@ class FakeCallProvider:
                 "supplier_notes": "Exact reference could not be confirmed.",
             },
         }
+
     @staticmethod
     def _supplier(label: str, phone_e164: str) -> Supplier:
         name = f"Supplier {label}"

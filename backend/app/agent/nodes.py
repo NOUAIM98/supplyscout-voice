@@ -95,7 +95,7 @@ class ProcurementNodes:
         quote = self._selected_quote(state)
         supplier = self.dependencies.suppliers[quote.supplier_id]
         result = self.dependencies.provider.create_reservation_call(
-            sourcing_request, quote, supplier
+            sourcing_request, quote, supplier, approved=state["reservation_approved"]
         )
         return {
             "workflow_status": "reservation_call",

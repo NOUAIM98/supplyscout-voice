@@ -9,7 +9,7 @@ from ..agent.state import ProcurementAgentState
 from ..config import settings
 from ..db.models import SourcingRequest, Supplier, SupplierQuote
 from ..domain.ranking import rank_quotes
-from ..providers.calls.fake import FakeCallProvider
+from ..providers.calls.factory import create_call_provider
 from ..schemas.quotes import (
     QuoteSelection,
     RankingEntry,
@@ -20,7 +20,7 @@ from ..schemas.sourcing import SourcingRequestCreate, SourcingRequestRead
 
 
 router = APIRouter()
-provider = FakeCallProvider()
+provider = create_call_provider(settings)
 suppliers: dict[str, Supplier] = {
     supplier.id: supplier for supplier in provider.suppliers()
 }

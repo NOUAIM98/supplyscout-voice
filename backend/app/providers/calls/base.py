@@ -21,4 +21,6 @@ class CallProvider(Protocol):
         sourcing_request: SourcingRequest,
         selected_quote: SupplierQuote,
         supplier: Supplier,
+        *,
+        approved: bool = False,
     ) -> dict[str, str | None]: ...
