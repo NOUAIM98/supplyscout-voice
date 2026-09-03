@@ -45,3 +45,7 @@ class RankingResponse(BaseModel):
     recommended_supplier_name: str
     explanation: str
     ranking: list[RankingEntry]
+
+
+class QuoteSelection(BaseModel):
+    quote_id: str

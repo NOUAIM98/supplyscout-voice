@@ -22,7 +22,41 @@ class FakeCallProvider:
     def collect_quotes(
         self, sourcing_request: SourcingRequest, suppliers: Sequence[Supplier]
     ) -> list[SupplierQuote]:
-        fixtures = {
+        return [
+            self.create_quote_call(sourcing_request, supplier)
+            for supplier in suppliers
+        ]
+
+    def create_quote_call(
+        self, sourcing_request: SourcingRequest, supplier: Supplier
+    ) -> SupplierQuote:
+        fixtures = self._quote_fixtures()
+        return SupplierQuote(
+            id=str(uuid5(NAMESPACE_URL, f"{sourcing_request.id}:{supplier.id}")),
+            sourcing_request_id=sourcing_request.id,
+            supplier_id=supplier.id,
+            created_at=datetime.now(timezone.utc),
+            **fixtures[supplier.name],
+        )
+
+    def create_reservation_call(
+        self,
+        sourcing_request: SourcingRequest,
+        selected_quote: SupplierQuote,
+        supplier: Supplier,
+    ) -> dict[str, str | None]:
+        if selected_quote.sourcing_request_id != sourcing_request.id:
+            raise ValueError("Selected quote does not belong to the sourcing request")
+        if selected_quote.supplier_id != supplier.id:
+            raise ValueError("Selected quote does not belong to the supplier")
+        return {
+            "outcome": "confirmed",
+            "supplier_reference": f"FAKE-RES-{supplier.name[-1]}-001",
+        }
+
+    @staticmethod
+    def _quote_fixtures() -> dict[str, dict[str, object]]:
+        return {
             "Supplier A": {
                 "exact_reference_confirmed": "yes",
                 "offered_reference": REFERENCE,
@@ -72,17 +106,6 @@ class FakeCallProvider:
                 "supplier_notes": "Exact reference could not be confirmed.",
             },
         }
-        return [
-            SupplierQuote(
-                id=str(uuid5(NAMESPACE_URL, f"{sourcing_request.id}:{supplier.id}")),
-                sourcing_request_id=sourcing_request.id,
-                supplier_id=supplier.id,
-                created_at=datetime.now(timezone.utc),
-                **fixtures[supplier.name],
-            )
-            for supplier in suppliers
-        ]
-
     @staticmethod
     def _supplier(label: str, phone_e164: str) -> Supplier:
         name = f"Supplier {label}"

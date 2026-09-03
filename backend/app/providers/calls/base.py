@@ -11,3 +11,14 @@ class CallProvider(Protocol):
     def collect_quotes(
         self, sourcing_request: SourcingRequest, suppliers: Sequence[Supplier]
     ) -> list[SupplierQuote]: ...
+
+    def create_quote_call(
+        self, sourcing_request: SourcingRequest, supplier: Supplier
+    ) -> SupplierQuote: ...
+
+    def create_reservation_call(
+        self,
+        sourcing_request: SourcingRequest,
+        selected_quote: SupplierQuote,
+        supplier: Supplier,
+    ) -> dict[str, str | None]: ...

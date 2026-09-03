@@ -9,6 +9,7 @@ from backend.app.main import app
 def clear_in_memory_store() -> None:
     routes.sourcing_requests.clear()
     routes.quotes_by_request.clear()
+    routes.workflow_states.clear()
 
 
 @pytest.fixture
