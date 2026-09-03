@@ -670,7 +670,7 @@ None of these deferrals permits supplier reliability, autonomous purchasing, pay
 
 ## 33. Eraser Diagram Requirements
 
-The architecture diagram set contains exactly three diagrams. Diagram 1 is completed/exported; Diagrams 2 and 3 remain pending and must not be created until requested.
+The architecture diagram set contains exactly three completed/exported diagrams.
 
 ### 1. High-Level System Architecture — Completed/Exported
 
@@ -681,16 +681,20 @@ The canonical implemented/exported high-level architecture diagram is stored at 
 - **Important labels:** human quote and reservation approvals, “LangGraph orchestrates—not business truth,” “RAG context only,” “LLM never chooses winner,” “server-side credentials,” “async calls,” and “idempotent webhook.”
 - **Judge message:** one human-controlled Procurement Agent orchestrates context, parallel CALL-E conversations, deterministic comparison, and reservation while authoritative data and decisions remain constrained and explainable.
 
-### 2. End-to-End CALL-E Sequence Diagram — Pending
+### 2. End-to-End CALL-E Sequence Diagram — Completed/Exported
 
-- **Participants:** user, Next.js, FastAPI, PostgreSQL, Redis/worker, CALL-E, supplier.
+The canonical implemented/exported sequence diagram is stored at `docs/diagrams/supplyscout-call-e-sequence.png`.
+
+- **Participants:** user, Next.js, FastAPI, SupplyScout Procurement Agent with LangGraph, PostgreSQL with pgvector, Redis/RQ workers, CALL-E, approved supplier, and deterministic ranking.
 - **Relationships/sequence:** create request → select approved suppliers → generate preview → approve → persist attempts → enqueue parallel jobs → CALL-E quote calls → idempotent terminal webhooks → normalize/rank → user selection → reservation preview → separate approval → reservation call → stored terminal outcome.
 - **Important labels:** approval gates, three calls in parallel, AI disclosure, logical idempotency keys, uncertain result handling, deterministic recommendation, manual selection, and separate reservation authority.
 - **Judge message:** several unstructured calls become comparable quotes and a completed reservation without surrendering human control.
 
-### 3. Database ERD — Pending
+### 3. Database ERD — Completed/Exported
 
-- **Entities:** `Supplier`, `SourcingRequest`, supplier-selection join table, `CallAttempt`, `SupplierQuote`, `Reservation`, `AuditEvent`, and the internal webhook-deduplication record.
-- **Relationships:** request-to-selected-suppliers many-to-many; request/supplier-to-attempts; completed quote attempt-to-quote zero-or-one; request-to-quotes one-to-many; request-to-selected quote zero-or-one; selected quote-to-reservation; reservation-to-attempts one-to-many; request-to-audit events one-to-many.
+The canonical implemented/exported database ERD is stored at `docs/diagrams/supplyscout-database-erd.png`.
+
+- **Entities:** `Supplier`, `SourcingRequest`, supplier-selection join table, `CallAttempt`, `SupplierQuote`, `Reservation`, `AuditEvent`, internal webhook-deduplication record, LangGraph workflow checkpoint, and pgvector-backed knowledge chunk.
+- **Relationships:** request-to-selected-suppliers many-to-many; request/supplier-to-attempts; completed quote attempt-to-quote zero-or-one; request-to-quotes one-to-many; request-to-selected quote zero-or-one; selected quote-to-reservation; reservation-to-attempts one-to-many; request-to-audit events and workflow checkpoints one-to-many; curated knowledge chunks remain separate contextual records.
 - **Important labels:** E.164 and authorization, quote/reservation logical keys, attempt numbers, unique provider IDs, terminal states, result classification, separate reservation approval, and redacted audit metadata.
 - **Judge message:** a compact relational model makes approvals, duplicates, uncertain quotes, explanations, and reservation outcomes traceable and enforceable.
