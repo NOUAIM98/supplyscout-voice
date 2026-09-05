@@ -7,7 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from fastapi.testclient import TestClient
 
-from backend.app.api import routes
 from backend.app.main import app
 
 
@@ -24,35 +23,41 @@ DEMO_REQUEST = {
 }
 
 
-def advance(state: dict, **updates) -> dict:
-    state, transitions = routes.agent.run_with_transitions({**state, **updates})
-    for transition in transitions:
-        print(f"→ {transition}")
-    routes.workflow_states[state["sourcing_request_id"]] = state
-    return state
-
-
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     client = TestClient(app)
     request = client.post("/api/v1/sourcing-requests", json=DEMO_REQUEST).json()
-    state = routes.workflow_states[request["id"]]
+    request_id = request["id"]
     print("request_created")
 
-    state = advance(state)
+    preview = client.post(
+        f"/api/v1/sourcing-requests/{request_id}/quote-preview"
+    ).json()
+    print(preview["workflow_status"])
     print("STOP — human quote approval required")
 
     print("human approves quote calls")
-    state = advance(state, quote_call_approved=True)
+    client.post(f"/api/v1/sourcing-requests/{request_id}/approve-quote-calls")
+    ranking = client.get(
+        f"/api/v1/sourcing-requests/{request_id}/ranking"
+    ).json()
+    print("awaiting_human_selection")
     print("STOP — human supplier selection required")
 
     print("human selects recommended Supplier A quote")
-    state = advance(state, selected_quote_id=state["recommended_quote_id"])
+    client.post(
+        f"/api/v1/sourcing-requests/{request_id}/select-quote",
+        json={"quote_id": ranking["ranking"][0]["quote_id"]},
+    )
+    print("awaiting_reservation_approval")
     print("STOP — human reservation approval required")
 
     print("human approves reservation")
-    state = advance(state, reservation_approved=True)
-    print(f"fake reservation outcome: {state['reservation_result']['outcome']}")
+    completed = client.post(
+        f"/api/v1/sourcing-requests/{request_id}/approve-reservation"
+    ).json()
+    print(f"workflow status: {completed['workflow_status']}")
+    print(f"fake reservation outcome: {completed['reservation_result']['outcome']}")
 
 
 if __name__ == "__main__":

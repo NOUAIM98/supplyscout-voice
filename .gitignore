@@ -1,5 +1,6 @@
 backend/.venv/
 backend/poc/results/
+backend/supplyscout.db
 .env
 backend/.env
 **pycache**/
