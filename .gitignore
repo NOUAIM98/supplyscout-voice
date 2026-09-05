@@ -1,4 +1,5 @@
 backend/.venv/
+backend/poc/results/
 .env
 backend/.env
 **pycache**/

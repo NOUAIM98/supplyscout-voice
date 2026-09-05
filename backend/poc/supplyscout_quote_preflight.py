@@ -1,65 +1,114 @@
 import inspect
 import os
-import re
 import ssl
 import sys
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from calle.calls import CalleCalls
 from dotenv import load_dotenv
 
-from supplyscout_quote_preview import (
-    CALL_E_TASK,
-    IDEMPOTENCY_KEY,
-    SUPPLIER_QUOTE_SCHEMA,
-    mask_phone,
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from backend.app.db.models import SourcingRequest, Supplier
+from backend.app.providers.calls.calle import (
+    CALLE_QUOTE_SCHEMA,
+    E164_PATTERN,
+    CalleCallProvider,
 )
 
 
-E164_PATTERN = re.compile(r"\+[1-9]\d{7,14}")
+REQUEST_ID = "demo-clio-alternator-001"
+SUPPLIER_ID = "test-supplier-001"
 
 
-def load_recipient() -> dict[str, Any]:
+def mask_phone(phone: str) -> str:
+    if len(phone) < 7:
+        return "******"
+    return f"{phone[:3]}******{phone[-3:]}"
+
+
+def load_configuration() -> dict[str, str]:
     backend_dir = Path(__file__).resolve().parents[1]
     load_dotenv(backend_dir / ".env", override=False)
     return {
-        "phones": [(os.getenv("CALLE_TEST_PHONE") or "").strip()],
+        "api_key": (os.getenv("CALLE_API_KEY") or "").strip(),
+        "base_url": (
+            os.getenv("CALLE_BASE_URL") or "https://api.heycall-e.com"
+        ).strip(),
+        "phone": (os.getenv("CALLE_TEST_PHONE") or "").strip(),
         "region": (os.getenv("CALLE_TEST_REGION") or "").strip(),
         "locale": (os.getenv("CALLE_TEST_LOCALE") or "").strip(),
+        "live_test_confirm": (
+            os.getenv("CALLE_LIVE_TEST_CONFIRM") or ""
+        ).strip(),
     }
 
 
-def validate_recipient(recipient: dict[str, Any]) -> list[str]:
-    phone = recipient["phones"][0]
-    region = recipient["region"]
-    locale = recipient["locale"]
+def validate_configuration(configuration: dict[str, str]) -> list[str]:
     errors = []
+    phone = configuration["phone"]
     if not phone:
         errors.append("CALLE_TEST_PHONE is missing")
     elif E164_PATTERN.fullmatch(phone) is None:
         errors.append("CALLE_TEST_PHONE must use E.164 format")
-    if not region:
-        errors.append("CALLE_TEST_REGION is missing")
-    elif region.upper() == "MA":
-        errors.append("CALLE_TEST_REGION must not be MA for this test")
-    if not locale:
-        errors.append("CALLE_TEST_LOCALE is missing")
+    elif not phone.startswith("+33"):
+        errors.append("CALLE_TEST_PHONE must be an authorized French +33 number")
+    if configuration["region"] != "FR":
+        errors.append("CALLE_TEST_REGION must equal FR")
+    if configuration["locale"] != "fr-FR":
+        errors.append("CALLE_TEST_LOCALE must equal fr-FR")
+    if not configuration["api_key"]:
+        errors.append("CALLE_API_KEY is missing")
     return errors
 
 
-def build_future_request(recipient: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "task": CALL_E_TASK,
-        "recipient": recipient,
-        "result_schema": SUPPLIER_QUOTE_SCHEMA,
-        "metadata": {
-            "workflow_type": "supplier_quote",
-            "sourcing_request_ref": "demo-clio-alternator-001",
-            "environment": "poc",
+def build_models(configuration: dict[str, str]) -> tuple[SourcingRequest, Supplier]:
+    now = datetime.now(timezone.utc)
+    sourcing_request = SourcingRequest(
+        id=REQUEST_ID,
+        vehicle_make="Renault",
+        vehicle_model="Clio",
+        vehicle_year=2019,
+        part_name="Alternator",
+        requested_reference="TEST-ALT-CLIO-2019-001",
+        quantity=1,
+        max_budget=Decimal("180.00"),
+        currency="EUR",
+        needed_by=date.today(),
+        status="preflight",
+        created_at=now,
+        updated_at=now,
+    )
+    supplier = Supplier(
+        id=SUPPLIER_ID,
+        name="Authorized French Test Recipient",
+        phone_e164=configuration["phone"],
+        authorized_for_calls=True,
+        created_at=now,
+        updated_at=now,
+    )
+    return sourcing_request, supplier
+
+
+def build_future_request(configuration: dict[str, str]) -> dict[str, Any]:
+    sourcing_request, supplier = build_models(configuration)
+    provider = CalleCallProvider(
+        api_key=configuration["api_key"],
+        base_url=configuration["base_url"],
+        recipients={
+            supplier.id: {
+                "phones": [configuration["phone"]],
+                "region": configuration["region"],
+                "locale": configuration["locale"],
+            }
         },
-        "idempotency_key": IDEMPOTENCY_KEY,
-    }
+    )
+    return provider.build_quote_request(sourcing_request, supplier)
 
 
 def validate_sdk_mapping(future_request: dict[str, Any]) -> None:
@@ -74,50 +123,45 @@ def validate_tls() -> None:
 
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
-    recipient = load_recipient()
-    errors = validate_recipient(recipient)
-    future_request = build_future_request(recipient)
-    validate_sdk_mapping(future_request)
-    validate_tls()
+    configuration = load_configuration()
+    errors = validate_configuration(configuration)
+    future_request: dict[str, Any] | None = None
+    if not errors:
+        try:
+            future_request = build_future_request(configuration)
+            validate_sdk_mapping(future_request)
+            validate_tls()
+        except (PermissionError, RuntimeError, ValueError) as exc:
+            errors.append(str(exc))
 
-    phone = recipient["phones"][0]
-    print("SUPPLYSCOUT VOICE — LIVE CALL PREFLIGHT")
-    print("\nRecipient:")
-    print(mask_phone(phone) if phone else "not configured")
-    print("\nRegion:")
-    print(recipient["region"] or "not configured")
-    print("\nLocale:")
-    print(recipient["locale"] or "not configured")
-    print("\nVehicle:\n2019 Renault Clio")
-    print("\nPart:\nAlternator")
-    print("\nReference:\nTEST-ALT-CLIO-2019-001")
-    print("\nQuantity:\n1")
-    print("\nMaximum budget:\n180 EUR")
-    print("\nPurpose:\nSupplier quote collection only")
-    print("\nCALL-E will be instructed to:")
-    print("- identify itself as an AI assistant;")
-    print("- confirm exact reference;")
-    print("- collect factual quote information;")
-    print("- preserve uncertainty;")
-    print("- not order;")
-    print("- not purchase;")
-    print("- not pay;")
-    print("- not reserve;")
-    print("- not commit.")
-    print("\nStructured output fields:")
-    for field in SUPPLIER_QUOTE_SCHEMA["required"]:
-        print(f"- {field}")
-    print(f"\nIdempotency key:\n{future_request['idempotency_key']}")
-    print("\nSDK invocation mapping: VALIDATED, NOT EXECUTED")
-    print("TLS: SYSTEM TRUST STORE, CERTIFICATE VERIFICATION REQUIRED")
+    masked = (
+        mask_phone(configuration["phone"])
+        if configuration["phone"]
+        else "not configured"
+    )
+    print("SUPPLYSCOUT VOICE — FINAL LIVE CALL PREFLIGHT")
+    print(f"\nRecipient: {masked}")
+    print("Country: France")
+    print(f"Locale: {configuration['locale'] or 'not configured'}")
+    print("Purpose: Supplier quote collection")
+    print("Reference: TEST-ALT-CLIO-2019-001")
+    print("Budget: 180 EUR")
+    print(f"Live CALL-E provider ready: {'YES' if not errors else 'NO'}")
+    print(f"API key configured: {'YES' if configuration['api_key'] else 'NO'}")
+    if future_request is not None:
+        print("SDK fields: task, recipient, recipient_result_schema, metadata, idempotency_key")
+        print(f"Structured-result fields: {', '.join(CALLE_QUOTE_SCHEMA['properties'])}")
+        print(f"Idempotency key: {future_request['idempotency_key']}")
+        print(
+            "Task: French, consent-first authorized supplier quote collection; "
+            "no transaction or commitment"
+        )
     if errors:
-        print("\nPreflight validation: FAILED")
+        print("Preflight errors:")
         for error in errors:
             print(f"- {error}")
-    else:
-        print("\nPreflight validation: PASSED")
-    print("\nLIVE CALL NOT STARTED")
-    print("EXPLICIT HUMAN APPROVAL REQUIRED BEFORE POST /v1/calls")
+    print("\nNO CALL HAS BEEN PLACED")
+    print("\nEXPLICIT HUMAN APPROVAL IS REQUIRED BEFORE EXECUTING POST /v1/calls")
     return 1 if errors else 0
 
 

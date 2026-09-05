@@ -1,10 +1,12 @@
 import re
+import ssl
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+import httpx
 from calle import CalleClient
 
 from ...db.models import SourcingRequest, Supplier, SupplierQuote
@@ -108,27 +110,46 @@ class CalleCallProvider:
     def create_quote_call(
         self, sourcing_request: SourcingRequest, supplier: Supplier
     ) -> SupplierQuote:
+        response = self.start_quote_call(sourcing_request, supplier)
+        return self.normalize_quote_response(response, sourcing_request, supplier)
+
+    def start_quote_call(
+        self, sourcing_request: SourcingRequest, supplier: Supplier
+    ) -> dict[str, Any]:
+        request = self.build_quote_request(sourcing_request, supplier)
+        return self._client().calls.create(**request)
+
+    def build_quote_request(
+        self, sourcing_request: SourcingRequest, supplier: Supplier
+    ) -> dict[str, Any]:
+        """Build and validate SDK arguments without creating a CALL-E call."""
         recipient = self._validated_recipient(supplier)
-        response = self._client().calls.create(
-            task=self._quote_task(sourcing_request),
-            recipient=recipient,
-            recipient_result_schema=CALLE_QUOTE_SCHEMA,
-            metadata={
+        return {
+            "task": self._quote_task(sourcing_request, recipient["locale"]),
+            "recipient": recipient,
+            "recipient_result_schema": CALLE_QUOTE_SCHEMA,
+            "metadata": {
                 "workflow_type": "supplier_quote",
                 "sourcing_request_id": sourcing_request.id,
                 "supplier_id": supplier.id,
             },
-            idempotency_key=self.quote_idempotency_key(
+            "idempotency_key": self.quote_idempotency_key(
                 sourcing_request.id, supplier.id
             ),
-        )
-        return self.normalize_quote_response(response, sourcing_request, supplier)
+        }
 
     def get_quote_result(
         self, call_id: str, sourcing_request: SourcingRequest, supplier: Supplier
     ) -> SupplierQuote:
-        response = self._client().calls.get(call_id)
+        response = self.get_call(call_id)
         return self.normalize_quote_response(response, sourcing_request, supplier)
+
+    def get_call(self, call_id: str) -> dict[str, Any]:
+        return self._client().calls.get(call_id)
+
+    def list_goals(self, *, limit: int = 1) -> dict[str, Any]:
+        """Perform an authenticated, read-only connectivity check."""
+        return self._client().goals.list(limit=limit)
 
     def list_events(
         self, call_id: str, *, cursor: str | None = None, limit: int | None = None
@@ -209,12 +230,27 @@ class CalleCallProvider:
 
     def _client(self) -> Any:
         if self._client_instance is None:
+            ssl_context = ssl.create_default_context()
+            if (
+                not ssl_context.check_hostname
+                or ssl_context.verify_mode != ssl.CERT_REQUIRED
+            ):
+                raise RuntimeError("TLS certificate verification is not enabled")
+            http_client = httpx.Client(
+                base_url=self._base_url.rstrip("/"),
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                verify=ssl_context,
+            )
             self._client_instance = CalleClient(
                 api_key=self._api_key,
-                base_url=self._base_url,
-                timeout=30.0,
+                http_client=http_client,
             )
         return self._client_instance
+
+    def close(self) -> None:
+        if self._client_instance is not None:
+            self._client_instance._client.close()
 
     def _validated_recipient(self, supplier: Supplier) -> dict[str, Any]:
         if not supplier.authorized_for_calls:
@@ -252,14 +288,19 @@ class CalleCallProvider:
         recipient = recipients[0] if isinstance(recipients, list) and recipients else {}
         if not isinstance(recipient, dict):
             recipient = {}
+
+        def recipient_or_call(name: str) -> Any:
+            value = recipient.get(name)
+            return response.get(name) if value is None else value
+
         return {
             "call_id": response.get("id"),
             "status": response.get("status"),
-            "task_completed": recipient.get("task_completed"),
-            "completion_confidence": recipient.get("completion_confidence"),
-            "evidence": recipient.get("evidence"),
-            "failure_code": recipient.get("failure_code"),
-            "failure_message": recipient.get("failure_message"),
+            "task_completed": recipient_or_call("task_completed"),
+            "completion_confidence": recipient_or_call("completion_confidence"),
+            "evidence": recipient_or_call("evidence"),
+            "failure_code": recipient_or_call("failure_code"),
+            "failure_message": recipient_or_call("failure_message"),
         }
 
     @staticmethod
@@ -301,7 +342,27 @@ class CalleCallProvider:
         }
 
     @staticmethod
-    def _quote_task(request: SourcingRequest) -> str:
+    def _quote_task(request: SourcingRequest, locale: str) -> str:
+        if locale == "fr-FR":
+            return (
+                "Conduisez entièrement cet appel en français. Commencez exactement par : "
+                "« Bonjour. Je suis l’assistant vocal IA SupplyScout, et j’appelle dans "
+                "le cadre d’un test autorisé pour obtenir un devis de pièce automobile. "
+                "Êtes-vous d’accord pour continuer ? » Si la personne refuse ou ne donne "
+                "pas son consentement, terminez poliment l’appel sans poser de questions "
+                "d’approvisionnement. Si elle accepte, demandez un devis pour "
+                f"{request.quantity} {request.part_name} pour une {request.vehicle_make} "
+                f"{request.vehicle_model} {request.vehicle_year}, référence exacte "
+                f"{request.requested_reference}, nécessaire aujourd’hui, budget maximal "
+                f"{request.max_budget} {request.currency}. Recueillez : confirmation de la "
+                "référence exacte, stock, autre référence proposée, fabricant ou marque, "
+                "état, quantité disponible, prix unitaire, devise, taxes incluses ou non, "
+                "garantie, retrait aujourd’hui, délai de livraison, validité du devis et "
+                "notes du fournisseur. Posez de brèves questions de suivi en cas d’ambiguïté. "
+                "Préservez l’incertitude et n’inventez aucun fait. Ne commandez, n’achetez, "
+                "ne payez, ne réservez et ne prenez aucun engagement. Terminez poliment "
+                "après avoir recueilli les informations du devis."
+            )
         return (
             "Identify yourself as an AI assistant calling on behalf of an auto repair "
             f"shop. Collect a factual quote for {request.quantity} {request.part_name} "

@@ -1,3 +1,4 @@
+import ssl
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, NoReturn
@@ -193,6 +194,105 @@ def test_create_maps_recipient_schema_metadata_and_stable_idempotency() -> None:
     assert "do not order, purchase, pay, reserve, or commit" in payload["task"]
 
 
+def test_french_preflight_payload_is_consent_first_without_sdk_invocation() -> None:
+    provider, client = calle_provider(
+        recipient={"phones": ["+12025550104"], "region": "FR", "locale": "fr-FR"}
+    )
+
+    payload = provider.build_quote_request(sourcing_request(), supplier())
+
+    assert client.calls.created == []
+    assert payload["recipient"] == {
+        "phones": ["+12025550104"],
+        "region": "FR",
+        "locale": "fr-FR",
+    }
+    assert "Conduisez entièrement cet appel en français" in payload["task"]
+    assert "Êtes-vous d’accord pour continuer ?" in payload["task"]
+    assert "Si la personne refuse" in payload["task"]
+    assert "Ne commandez, n’achetez" in payload["task"]
+
+
+def test_start_quote_call_executes_create_once() -> None:
+    provider, client = calle_provider()
+
+    response = provider.start_quote_call(sourcing_request(), supplier())
+
+    assert response["id"] == "call-test-001"
+    assert len(client.calls.created) == 1
+
+
+def test_provider_builds_verified_system_trust_http_client(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class CapturedHttpClient:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def close(self) -> None:
+            pass
+
+    class CapturedCalleClient:
+        def __init__(self, *, api_key: str, http_client: Any) -> None:
+            captured["calle_api_key_argument"] = api_key
+            captured["http_client"] = http_client
+
+    monkeypatch.setattr(
+        "backend.app.providers.calls.calle.httpx.Client", CapturedHttpClient
+    )
+    monkeypatch.setattr(
+        "backend.app.providers.calls.calle.CalleClient", CapturedCalleClient
+    )
+    provider = CalleCallProvider(api_key="test-placeholder-key")
+
+    provider._client()
+
+    context = captured["verify"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert captured["base_url"] == "https://api.heycall-e.com"
+    assert captured["timeout"].connect == 10.0
+    assert captured["headers"]["Authorization"].startswith("Bearer ")
+    assert "test-placeholder-key" not in repr(captured["http_client"])
+
+
+def test_provider_read_only_goals_path_never_uses_calls_create() -> None:
+    class StubGoals:
+        def list(self, *, limit: int) -> dict[str, Any]:
+            return {"object": "list", "data": [], "limit": limit}
+
+    class ReadOnlyClient:
+        goals = StubGoals()
+
+        class Calls:
+            def create(self, **kwargs: Any) -> NoReturn:
+                raise AssertionError("calls.create must not be used by the goals check")
+
+        calls = Calls()
+
+    provider = CalleCallProvider(
+        api_key="test-placeholder-key", client=ReadOnlyClient()
+    )
+
+    result = provider.list_goals(limit=1)
+
+    assert result["limit"] == 1
+
+
+def test_live_poc_requires_exact_manual_confirmation() -> None:
+    from backend.poc.supplyscout_quote_live_test import (
+        LIVE_TEST_CONFIRMATION,
+        live_test_confirmed,
+    )
+
+    assert not live_test_confirmed({})
+    assert not live_test_confirmed({"live_test_confirm": "yes"})
+    assert live_test_confirmed(
+        {"live_test_confirm": LIVE_TEST_CONFIRMATION}
+    )
+
+
 def test_invalid_e164_is_rejected_before_sdk_invocation() -> None:
     provider, client = calle_provider(
         recipient={"phones": ["not-a-phone"], "region": "US", "locale": "en-US"}
@@ -220,6 +320,36 @@ def test_structured_result_normalizes_and_retains_safe_provider_data() -> None:
         "failure_code": None,
         "failure_message": None,
     }
+
+
+def test_provider_data_falls_back_to_call_level_terminal_fields() -> None:
+    response = structured_response()
+    recipient = response["recipients"][0]
+    for field in (
+        "task_completed",
+        "completion_confidence",
+        "evidence",
+        "failure_code",
+        "failure_message",
+    ):
+        recipient.pop(field)
+    response.update(
+        {
+            "task_completed": True,
+            "completion_confidence": {"score": 0.86, "label": "high"},
+            "evidence": ["safe evidence"],
+            "failure_code": None,
+            "failure_message": None,
+        }
+    )
+    provider, _ = calle_provider(response)
+
+    provider.create_quote_call(sourcing_request(), supplier())
+
+    result = provider.provider_results[supplier().id]
+    assert result["task_completed"] is True
+    assert result["completion_confidence"] == {"score": 0.86, "label": "high"}
+    assert result["evidence"] == ["safe evidence"]
 
 
 def test_null_structured_result_preserves_failure_without_guessed_quote() -> None:
