@@ -209,6 +209,18 @@ def test_postgres_migration_offline(monkeypatch):
     assert "knowledge_chunk_ids" in sql
 
 
+def test_alembic_accepts_percent_encoded_database_password(monkeypatch):
+    from io import StringIO
+    from alembic import command
+    from alembic.config import Config
+    output = StringIO()
+    fictional_url = "postgresql+psycopg://demo:p%40ss%25word%2Fvalue@localhost/demo"
+    monkeypatch.setattr(settings, "database_url", fictional_url)
+    config = Config("alembic.ini", output_buffer=output)
+    command.upgrade(config, "549733be0747:head", sql=True)
+    assert "CREATE TABLE knowledge_chunks" in output.getvalue()
+
+
 def test_sqlite_migration_round_trip(tmp_path, monkeypatch):
     from alembic import command
     from alembic.config import Config
