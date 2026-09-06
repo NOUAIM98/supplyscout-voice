@@ -79,6 +79,9 @@ def test_fake_provider_performs_no_network_request(monkeypatch) -> None:
 def test_create_sourcing_request(client: TestClient) -> None:
     request_id = create_request(client)
     assert request_id
+    response = client.get(f"/api/v1/sourcing-requests/{request_id}")
+    assert response.status_code == 200
+    assert response.json()["requested_reference"] == DEMO_REQUEST["requested_reference"]
 
 
 def test_approving_quote_calls_returns_three_quotes(client: TestClient) -> None:

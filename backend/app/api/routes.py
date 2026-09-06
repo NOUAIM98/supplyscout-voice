@@ -49,6 +49,15 @@ def create_sourcing_request(
     return request
 
 
+@router.get(
+    "/api/v1/sourcing-requests/{request_id}", response_model=SourcingRequestRead
+)
+def get_sourcing_request(
+    request_id: str, session: Session = Depends(get_db)
+) -> SourcingRequest:
+    return _get_request(session, request_id)
+
+
 @router.post("/api/v1/sourcing-requests/{request_id}/quote-preview")
 def create_quote_preview(
     request_id: str, session: Session = Depends(get_db)
