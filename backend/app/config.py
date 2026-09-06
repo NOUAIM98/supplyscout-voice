@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "development"
+    rag_mode: Literal["disabled", "fake", "postgres"] = "disabled"
     database_url: str | None = None
     call_provider_mode: Literal["fake", "calle"] = "fake"
     calle_api_key: str | None = None

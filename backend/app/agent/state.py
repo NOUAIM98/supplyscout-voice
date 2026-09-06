@@ -3,6 +3,7 @@ from typing import Literal, TypedDict
 
 WorkflowStatus = Literal[
     "request_created",
+    "context_retrieval",
     "call_preview",
     "awaiting_quote_approval",
     "supplier_calls_dispatched",
@@ -43,3 +44,4 @@ class ProcurementAgentState(TypedDict):
     reservation_approved: bool
     reservation_result: ReservationResult | None
     errors: list[str]
+    knowledge_chunk_ids: list[str]

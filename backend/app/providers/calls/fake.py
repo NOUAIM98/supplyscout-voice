@@ -28,7 +28,7 @@ class FakeCallProvider:
         ]
 
     def create_quote_call(
-        self, sourcing_request: SourcingRequest, supplier: Supplier
+        self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> SupplierQuote:
         fixtures = self._quote_fixtures()
         return SupplierQuote(

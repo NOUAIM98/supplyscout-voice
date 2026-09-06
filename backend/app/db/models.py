@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from pgvector.sqlalchemy import Vector
 
 from sqlalchemy import JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKey
 from sqlalchemy import Integer, Numeric, String, Text, UniqueConstraint
@@ -37,6 +38,7 @@ class SourcingRequest(TimestampMixin, Base):
     needed_by: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(40), default="request_created")
     selected_quote_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    knowledge_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class SourcingRequestSupplier(Base):
@@ -140,3 +142,23 @@ class WebhookReceipt(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(30), default="received")
+
+
+class KnowledgeChunk(TimestampMixin, Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('part_reference_note', 'vehicle_compatibility', "
+            "'substitution_rule', 'procurement_policy', 'call_policy')",
+            name="ck_knowledge_source_type",
+        ),
+        UniqueConstraint("source_ref", name="uq_knowledge_source_ref"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(40))
+    source_ref: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    # SQLite JSON is storage for the explicit fake retrieval path, never pgvector.
+    embedding: Mapped[list[float]] = mapped_column(Vector(384).with_variant(JSON(), "sqlite"))

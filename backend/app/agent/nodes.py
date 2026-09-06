@@ -9,6 +9,7 @@ from ..db.repositories import ReservationRepository, SourcingRequestRepository
 from ..db.repositories import SupplierRepository
 from ..domain.ranking import rank_quotes
 from ..providers.calls.base import CallProvider
+from ..knowledge.service import build_retriever, compose_quote_context, load_context
 from .state import ProcurementAgentState
 
 
@@ -28,10 +29,18 @@ class ProcurementNodes:
         self.attempts = CallAttemptRepository(dependencies.session)
         self.audit = AuditRepository(dependencies.session)
 
+    def context_retrieval(self, state: ProcurementAgentState) -> dict:
+        request = self._request(state)
+        retriever = build_retriever(self.dependencies.session)
+        chunks = retriever.retrieve(request) if retriever else []
+        request.knowledge_chunk_ids = [chunk.id for chunk in chunks]
+        request.status = "context_retrieval"
+        return {"workflow_status": "context_retrieval", "knowledge_chunk_ids": request.knowledge_chunk_ids}
+
     def call_preview(self, state: ProcurementAgentState) -> dict:
         request = self._request(state)
         request.status = "call_preview"
-        self.audit.record(request.id, "preview_generated")
+        self.audit.record(request.id, "preview_generated", {"knowledge_chunk_ids": request.knowledge_chunk_ids})
         return {"workflow_status": "call_preview"}
 
     def awaiting_quote_approval(self, state: ProcurementAgentState) -> dict:
@@ -56,7 +65,8 @@ class ProcurementNodes:
             )
             self.attempts.add(attempt)
             self.audit.record(request.id, "supplier_call_started", {"supplier_id": supplier.id})
-            quote = self.dependencies.provider.create_quote_call(request, supplier)
+            context = compose_quote_context(load_context(self.dependencies.session, request.knowledge_chunk_ids))
+            quote = self.dependencies.provider.create_quote_call(request, supplier, knowledge_context=context)
             stored_quotes.append(self.quotes.add(quote))
             attempt.status = "completed"
             self.audit.record(request.id, "supplier_call_completed", {"supplier_id": supplier.id})

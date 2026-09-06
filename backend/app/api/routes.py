@@ -13,6 +13,7 @@ from ..db.repositories import AuditRepository, QuoteRepository, ReservationRepos
 from ..db.repositories import SourcingRequestRepository, SupplierRepository
 from ..db.session import get_db
 from ..domain.ranking import rank_quotes
+from ..knowledge.service import build_retriever, compose_quote_context, provenance
 from ..providers.calls.factory import create_call_provider
 from ..schemas.quotes import QuoteSelection, RankingEntry, RankingResponse, SupplierQuoteRead
 from ..schemas.sourcing import SourcingRequestCreate, SourcingRequestRead
@@ -57,6 +58,20 @@ def create_quote_preview(
     if state["workflow_status"] == "request_created":
         state = _agent(session).run(state)
     return state
+
+
+@router.post("/api/v1/sourcing-requests/{request_id}/context-preview")
+def context_preview(request_id: str, session: Session = Depends(get_db)) -> dict:
+    request = _get_request(session, request_id)
+    if settings.app_env not in {"development", "test"}:
+        raise HTTPException(status_code=404, detail="Development preview is disabled")
+    try:
+        retriever = build_retriever(session)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="RAG configuration is not ready") from None
+    chunks = retriever.retrieve(request) if retriever else []
+    return {"mode": settings.rag_mode, "chunks": provenance(chunks),
+            "task_context": compose_quote_context(chunks), "call_started": False}
 
 
 @router.post(
@@ -182,8 +197,9 @@ def _workflow_state(session: Session, request: SourcingRequest) -> ProcurementAg
     reservation = ReservationRepository(session).for_request(request.id)
     return {
         "sourcing_request_id": request.id,
+        "knowledge_chunk_ids": request.knowledge_chunk_ids,
         "workflow_status": request.status,
-        "quote_call_approved": request.status not in {"request_created", "call_preview", "awaiting_quote_approval"},
+        "quote_call_approved": request.status not in {"request_created", "context_retrieval", "call_preview", "awaiting_quote_approval"},
         "quotes": [quote.id for quote in quotes],
         "ranking": ranking,
         "recommended_quote_id": ranking[0] if ranking else None,

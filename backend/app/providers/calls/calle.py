@@ -108,24 +108,24 @@ class CalleCallProvider:
         ]
 
     def create_quote_call(
-        self, sourcing_request: SourcingRequest, supplier: Supplier
+        self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> SupplierQuote:
-        response = self.start_quote_call(sourcing_request, supplier)
+        response = self.start_quote_call(sourcing_request, supplier, knowledge_context=knowledge_context)
         return self.normalize_quote_response(response, sourcing_request, supplier)
 
     def start_quote_call(
-        self, sourcing_request: SourcingRequest, supplier: Supplier
+        self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> dict[str, Any]:
-        request = self.build_quote_request(sourcing_request, supplier)
+        request = self.build_quote_request(sourcing_request, supplier, knowledge_context=knowledge_context)
         return self._client().calls.create(**request)
 
     def build_quote_request(
-        self, sourcing_request: SourcingRequest, supplier: Supplier
+        self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> dict[str, Any]:
         """Build and validate SDK arguments without creating a CALL-E call."""
         recipient = self._validated_recipient(supplier)
         return {
-            "task": self._quote_task(sourcing_request, recipient["locale"]),
+            "task": self._quote_task(sourcing_request, recipient["locale"]) + ("\n" + knowledge_context if knowledge_context else ""),
             "recipient": recipient,
             "recipient_result_schema": CALLE_QUOTE_SCHEMA,
             "metadata": {

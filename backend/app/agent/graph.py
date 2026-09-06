@@ -8,6 +8,7 @@ class ProcurementAgent:
     def __init__(self, dependencies: AgentDependencies) -> None:
         nodes = ProcurementNodes(dependencies)
         builder = StateGraph(ProcurementAgentState)
+        builder.add_node("context_retrieval", nodes.context_retrieval)
         builder.add_node("call_preview", nodes.call_preview)
         builder.add_node("awaiting_quote_approval", nodes.awaiting_quote_approval)
         builder.add_node("dispatch_supplier_calls", nodes.dispatch_supplier_calls)
@@ -25,13 +26,14 @@ class ProcurementAgent:
             START,
             self._next_step,
             {
-                "call_preview": "call_preview",
+                "context_retrieval": "context_retrieval",
                 "dispatch_supplier_calls": "dispatch_supplier_calls",
                 "reservation_preview": "reservation_preview",
                 "reservation_call": "reservation_call",
                 "stop": END,
             },
         )
+        builder.add_edge("context_retrieval", "call_preview")
         builder.add_edge("call_preview", "awaiting_quote_approval")
         builder.add_edge("awaiting_quote_approval", END)
         builder.add_edge("dispatch_supplier_calls", "normalize_quotes")
@@ -56,6 +58,7 @@ class ProcurementAgent:
             "reservation_approved": False,
             "reservation_result": None,
             "errors": [],
+            "knowledge_chunk_ids": [],
         }
 
     def run(self, state: ProcurementAgentState) -> ProcurementAgentState:
@@ -77,7 +80,7 @@ class ProcurementAgent:
     def _next_step(state: ProcurementAgentState) -> str:
         status = state["workflow_status"]
         if status == "request_created":
-            return "call_preview"
+            return "context_retrieval"
         if status == "awaiting_quote_approval" and state["quote_call_approved"]:
             return "dispatch_supplier_calls"
         if status == "awaiting_human_selection" and state["selected_quote_id"]:

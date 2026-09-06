@@ -13,7 +13,7 @@ class CallProvider(Protocol):
     ) -> list[SupplierQuote]: ...
 
     def create_quote_call(
-        self, sourcing_request: SourcingRequest, supplier: Supplier
+        self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> SupplierQuote: ...
 
     def create_reservation_call(
