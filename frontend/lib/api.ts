@@ -5,6 +5,7 @@ import type {
   SourcingRequestInput,
   SupplierQuote,
   WorkflowState,
+  ActivityEvent,
 } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -38,4 +39,7 @@ export const api = {
   getQuotes: (id: string) => request<SupplierQuote[]>(`/api/v1/sourcing-requests/${id}/quotes`),
   getRanking: (id: string) => request<RankingResponse>(`/api/v1/sourcing-requests/${id}/ranking`),
   selectQuote: (id: string, quoteId: string) => request<WorkflowState>(`/api/v1/sourcing-requests/${id}/select-quote`, { method: "POST", body: JSON.stringify({ quote_id: quoteId }) }),
+  getActivity: (id: string) => request<ActivityEvent[]>(`/api/v1/sourcing-requests/${id}/activity`),
+  getReservationPreview: (id: string) => request<WorkflowState>(`/api/v1/sourcing-requests/${id}/reservation-preview`, { method: "POST" }),
+  approveReservation: (id: string) => request<WorkflowState>(`/api/v1/sourcing-requests/${id}/approve-reservation`, { method: "POST" }),
 };

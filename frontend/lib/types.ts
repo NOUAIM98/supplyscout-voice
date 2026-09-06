@@ -28,7 +28,22 @@ export interface WorkflowState {
   recommended_quote_id: string | null;
   selected_quote_id: string | null;
   knowledge_chunk_ids: string[];
+  reservation_approved: boolean;
+  reservation_result: ReservationResult | null;
   errors: string[];
+}
+
+export type ReservationOutcome = "pending_approval" | "calling" | "confirmed" | "refused" | "unavailable" | "unclear" | "no_answer" | "failed";
+
+export interface ReservationResult {
+  outcome: ReservationOutcome;
+  supplier_reference: string | null;
+}
+
+export interface ActivityEvent {
+  id: string;
+  event_type: string;
+  created_at: string;
 }
 
 export interface KnowledgeChunk {

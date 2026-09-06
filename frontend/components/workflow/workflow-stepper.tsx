@@ -8,12 +8,14 @@ const steps = [
   ["Supplier calls", ["supplier_calls_dispatched", "quotes_normalized", "ranked", "awaiting_human_selection"]],
   ["Quotes", ["quotes_normalized", "ranked", "awaiting_human_selection"]],
   ["Decision", ["awaiting_human_selection", "reservation_preview", "awaiting_reservation_approval"]],
+  ["Reservation", ["reservation_preview", "awaiting_reservation_approval", "reservation_call"]],
+  ["Completed", ["completed"]],
 ] as const;
-const order = ["request_created", "context_retrieval", "call_preview", "awaiting_quote_approval", "supplier_calls_dispatched", "quotes_normalized", "ranked", "awaiting_human_selection", "reservation_preview", "awaiting_reservation_approval"];
+const order = ["request_created", "context_retrieval", "call_preview", "awaiting_quote_approval", "supplier_calls_dispatched", "quotes_normalized", "ranked", "awaiting_human_selection", "reservation_preview", "awaiting_reservation_approval", "reservation_call", "completed"];
 
 export function WorkflowStepper({ status }: { status: string }) {
   const current = order.indexOf(status);
-  return <ol aria-label="Sourcing workflow" className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+  return <ol aria-label="Sourcing workflow" className="grid gap-2 sm:grid-cols-4 xl:grid-cols-8">
     {steps.map(([label, statuses], index) => {
       const active = statuses.includes(status as never);
       const stepStart = order.indexOf(statuses[0]);

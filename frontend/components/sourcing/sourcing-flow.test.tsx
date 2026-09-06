@@ -7,7 +7,9 @@ import { WorkflowStepper } from "@/components/workflow/workflow-stepper";
 import { QuoteComparison } from "@/components/quotes/quote-comparison";
 import { RankingPanel } from "@/components/quotes/ranking-panel";
 import { ApprovalPanel } from "@/components/workflow/approval-panel";
-import type { RankingResponse, SupplierQuote } from "@/lib/types";
+import { ReservationPanel, ReservationStage } from "@/components/workflow/reservation-panel";
+import { AgentActivity } from "@/components/workflow/agent-activity";
+import type { RankingResponse, SourcingRequest, SupplierQuote } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -18,6 +20,13 @@ const quote = (overrides: Partial<SupplierQuote> = {}): SupplierQuote => ({
   tax_included: "unknown", warranty_months: 12, pickup_available_today: "yes",
   delivery_eta: null, quote_valid_until: null, supplier_notes: null, ...overrides,
 });
+
+const request: SourcingRequest = {
+  id: "r1", vehicle_make: "Renault", vehicle_model: "Clio", vehicle_year: 2019,
+  part_name: "Alternator", requested_reference: "TEST-ALT-CLIO-2019-001", quantity: 1,
+  max_budget: "180.00", currency: "EUR", needed_by: "2026-09-06", status: "awaiting_reservation_approval",
+  created_at: "2026-09-06T10:00:00Z", updated_at: "2026-09-06T10:00:00Z",
+};
 
 function withQuery(ui: React.ReactNode) {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{ui}</QueryClientProvider>);
@@ -63,5 +72,81 @@ describe("Phase F1 sourcing flow", () => {
     expect(screen.getByText("Backend explanation")).toBeVisible();
     expect(screen.getByText("Recommended ≠ Selected")).toBeVisible();
     expect(screen.queryByText("Selected", { exact: true })).not.toBeInTheDocument();
+  });
+});
+
+describe("Phase F2 reservation flow", () => {
+  const props = { request, quote: quote(), reviewed: true, outcome: "pending_approval" as const, previewing: false, approving: false, onReview: vi.fn(), onApprove: vi.fn() };
+
+  it("does not show reservation controls before supplier selection", () => {
+    render(<ReservationStage {...props} quote={null} />);
+    expect(screen.queryByRole("button", { name: /review reservation/i })).not.toBeInTheDocument();
+  });
+
+  it("enables reservation review after supplier selection", async () => {
+    const onReview = vi.fn();
+    render(<ReservationPanel {...props} reviewed={false} onReview={onReview} />);
+    await userEvent.click(screen.getByRole("button", { name: /review reservation/i }));
+    expect(onReview).toHaveBeenCalledOnce();
+  });
+
+  it("preview does not execute reservation", () => {
+    const onApprove = vi.fn();
+    render(<ReservationPanel {...props} onApprove={onApprove} />);
+    expect(screen.getByText(/has not contacted the supplier for reservation yet/i)).toBeVisible();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit second approval", () => {
+    const onApprove = vi.fn();
+    render(<ReservationPanel {...props} onApprove={onApprove} />);
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /approve reservation call/i })).toBeVisible();
+  });
+
+  it("allows the confirmation dialog to cancel", async () => {
+    const onApprove = vi.fn();
+    render(<ReservationPanel {...props} onApprove={onApprove} />);
+    await userEvent.click(screen.getByRole("button", { name: /approve reservation call/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it("executes approval only after confirmation", async () => {
+    const onApprove = vi.fn();
+    render(<ReservationPanel {...props} onApprove={onApprove} />);
+    await userEvent.click(screen.getByRole("button", { name: /approve reservation call/i }));
+    expect(onApprove).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("dialog").getElementsByTagName("button")[1]);
+    expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  it("renders a confirmed reservation result", () => {
+    render(<ReservationPanel {...props} outcome="confirmed" reference="FAKE-RES-A-001" />);
+    expect(screen.getByText("Reservation confirmed")).toBeVisible();
+    expect(screen.getByText("FAKE-RES-A-001")).toBeVisible();
+  });
+
+  it.each(["refused", "unavailable", "unclear", "no_answer", "failed"] as const)("does not present %s as success", outcome => {
+    render(<ReservationPanel {...props} outcome={outcome} />);
+    expect(screen.getByText("Human review required")).toBeVisible();
+    expect(screen.queryByText("Reservation confirmed")).not.toBeInTheDocument();
+  });
+
+  it("shows factual agent timeline events", () => {
+    render(<AgentActivity events={[{ id: "a1", event_type: "request_created", created_at: "2026-09-06T10:00:00Z" }, { id: "a2", event_type: "reservation_preview_prepared", created_at: "2026-09-06T10:01:00Z" }]} />);
+    expect(screen.getByText("Request created")).toBeVisible();
+    expect(screen.getByText("Reservation preview prepared")).toBeVisible();
+  });
+
+  it("keeps the recommended supplier distinct from a different selection", () => {
+    const ranking: RankingResponse = { sourcing_request_id: "r1", recommended_supplier_id: "s1", recommended_supplier_name: "Supplier A", explanation: "Backend explanation", ranking: [
+      { rank: 1, quote_id: "q1", supplier_id: "s1", supplier_name: "Supplier A", reasons: [] },
+      { rank: 2, quote_id: "q2", supplier_id: "s2", supplier_name: "Supplier B", reasons: [] },
+    ] };
+    render(<RankingPanel ranking={ranking} selectedQuoteId="q2" />);
+    expect(screen.getByText("Recommended", { exact: true })).toBeVisible();
+    expect(screen.getByText("Selected", { exact: true })).toBeVisible();
   });
 });

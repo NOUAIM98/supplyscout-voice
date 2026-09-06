@@ -188,6 +188,19 @@ def get_workflow(
     return _workflow_state(session, _get_request(session, request_id))
 
 
+@router.get("/api/v1/sourcing-requests/{request_id}/activity")
+def get_activity(request_id: str, session: Session = Depends(get_db)) -> list[dict]:
+    _get_request(session, request_id)
+    return [
+        {
+            "id": event.id,
+            "event_type": event.event_type,
+            "created_at": event.created_at,
+        }
+        for event in AuditRepository(session).list_for_request(request_id)
+    ]
+
+
 def _agent(session: Session) -> ProcurementAgent:
     return ProcurementAgent(AgentDependencies(session=session, provider=provider))
 

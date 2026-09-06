@@ -35,6 +35,7 @@ class ProcurementNodes:
         chunks = retriever.retrieve(request) if retriever else []
         request.knowledge_chunk_ids = [chunk.id for chunk in chunks]
         request.status = "context_retrieval"
+        self.audit.record(request.id, "knowledge_retrieved", {"chunk_count": len(chunks)})
         return {"workflow_status": "context_retrieval", "knowledge_chunk_ids": request.knowledge_chunk_ids}
 
     def call_preview(self, state: ProcurementAgentState) -> dict:
@@ -82,6 +83,7 @@ class ProcurementNodes:
         request = self._request(state)
         request.status = "quotes_normalized"
         quotes = self.quotes.list_for_request(request.id)
+        self.audit.record(request.id, "quotes_normalized", {"quote_count": len(quotes)})
         return {"workflow_status": "quotes_normalized", "quotes": [q.id for q in quotes]}
 
     def rank_quotes(self, state: ProcurementAgentState) -> dict:
@@ -112,6 +114,7 @@ class ProcurementNodes:
                 supplier_id=quote.supplier_id, status="pending_approval",
             ))
             self.audit.record(request.id, "offer_selected", {"quote_id": quote.id})
+            self.audit.record(request.id, "reservation_preview_prepared")
         return {"workflow_status": "reservation_preview", "reservation_result": {"outcome": "pending_approval", "supplier_reference": None}, "errors": []}
 
     def awaiting_reservation_approval(self, state: ProcurementAgentState) -> dict:
@@ -148,7 +151,9 @@ class ProcurementNodes:
         return {"workflow_status": "reservation_call", "reservation_result": result, "errors": []}
 
     def completed(self, state: ProcurementAgentState) -> dict:
-        self._request(state).status = "completed"
+        request = self._request(state)
+        request.status = "completed"
+        self.audit.record(request.id, "workflow_completed")
         return {"workflow_status": "completed"}
 
     def _request(self, state: ProcurementAgentState) -> SourcingRequest:

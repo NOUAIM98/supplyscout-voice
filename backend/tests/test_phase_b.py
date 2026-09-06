@@ -130,3 +130,20 @@ def test_second_approval_completes_fake_reservation(
     assert response.json()["workflow_status"] == "completed"
     assert response.json()["reservation_approved"] is True
     assert response.json()["reservation_result"]["outcome"] == "confirmed"
+
+
+def test_activity_exposes_factual_events_without_sensitive_payloads(
+    client: TestClient,
+) -> None:
+    request_id = create_request(client)
+    client.post(f"/api/v1/sourcing-requests/{request_id}/quote-preview")
+    approve_quotes(client, request_id)
+
+    response = client.get(f"/api/v1/sourcing-requests/{request_id}/activity")
+
+    assert response.status_code == 200
+    events = response.json()
+    assert events[0]["event_type"] == "request_created"
+    assert "knowledge_retrieved" in [event["event_type"] for event in events]
+    assert "quotes_normalized" in [event["event_type"] for event in events]
+    assert all(set(event) == {"id", "event_type", "created_at"} for event in events)
