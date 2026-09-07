@@ -6,6 +6,9 @@ import type {
   SupplierQuote,
   WorkflowState,
   ActivityEvent,
+  CallAttempt,
+  CallSyncResponse,
+  RuntimeInfo,
 } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -29,6 +32,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getRuntime: () => request<RuntimeInfo>("/api/v1/runtime"),
   createRequest: (payload: SourcingRequestInput) =>
     request<SourcingRequest>("/api/v1/sourcing-requests", { method: "POST", body: JSON.stringify(payload) }),
   getRequest: (id: string) => request<SourcingRequest>(`/api/v1/sourcing-requests/${id}`),
@@ -42,4 +46,6 @@ export const api = {
   getActivity: (id: string) => request<ActivityEvent[]>(`/api/v1/sourcing-requests/${id}/activity`),
   getReservationPreview: (id: string) => request<WorkflowState>(`/api/v1/sourcing-requests/${id}/reservation-preview`, { method: "POST" }),
   approveReservation: (id: string) => request<WorkflowState>(`/api/v1/sourcing-requests/${id}/approve-reservation`, { method: "POST" }),
+  getCallAttempts: (id: string) => request<CallAttempt[]>(`/api/v1/sourcing-requests/${id}/call-attempts`),
+  syncCalls: (id: string) => request<CallSyncResponse>(`/api/v1/sourcing-requests/${id}/sync-calls`, { method: "POST" }),
 };

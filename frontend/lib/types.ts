@@ -46,6 +46,23 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+export interface RuntimeInfo {
+  call_provider_mode: "fake" | "calle";
+  live_calls_enabled: boolean;
+}
+
+export interface CallAttempt {
+  id: string;
+  call_type: "quote" | "reservation";
+  status: string;
+  provider_call_id: string | null;
+}
+
+export interface CallSyncResponse {
+  workflow: WorkflowState;
+  attempts: CallAttempt[];
+}
+
 export interface KnowledgeChunk {
   id: string;
   title: string;

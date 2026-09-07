@@ -92,6 +92,14 @@ class AuditRepository:
             .order_by(AuditEvent.created_at)
         ))
 
+    def exists(self, request_id: str, event_type: str) -> bool:
+        return self.session.scalar(
+            select(AuditEvent.id).where(
+                AuditEvent.sourcing_request_id == request_id,
+                AuditEvent.event_type == event_type,
+            ).limit(1)
+        ) is not None
+
 
 class CallAttemptRepository:
     def __init__(self, session: Session) -> None:
@@ -100,3 +108,18 @@ class CallAttemptRepository:
     def add(self, attempt: CallAttempt) -> CallAttempt:
         self.session.add(attempt)
         return attempt
+
+    def list_for_request(self, request_id: str) -> list[CallAttempt]:
+        return list(self.session.scalars(
+            select(CallAttempt)
+            .where(CallAttempt.sourcing_request_id == request_id)
+            .order_by(CallAttempt.created_at, CallAttempt.id)
+        ))
+
+    def for_operation(self, logical_key: str) -> CallAttempt | None:
+        return self.session.scalar(
+            select(CallAttempt).where(
+                CallAttempt.logical_idempotency_key == logical_key,
+                CallAttempt.attempt_number == 1,
+            )
+        )

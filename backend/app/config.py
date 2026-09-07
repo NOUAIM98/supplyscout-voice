@@ -20,6 +20,18 @@ class Settings(BaseSettings):
     call_provider_mode: Literal["fake", "calle"] = "fake"
     calle_api_key: str | None = None
     calle_base_url: str = "https://api.heycall-e.com"
+    calle_live_enabled: bool = False
+    calle_allowed_recipients: str = ""
+    calle_recipient_region: str | None = None
+    calle_recipient_locale: str | None = None
+
+    @property
+    def allowed_calle_recipients(self) -> frozenset[str]:
+        return frozenset(
+            phone.strip()
+            for phone in self.calle_allowed_recipients.split(",")
+            if phone.strip()
+        )
 
 
 settings = Settings()

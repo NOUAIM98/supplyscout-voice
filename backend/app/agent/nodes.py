@@ -9,6 +9,9 @@ from ..db.repositories import ReservationRepository, SourcingRequestRepository
 from ..db.repositories import SupplierRepository
 from ..domain.ranking import rank_quotes
 from ..providers.calls.base import CallProvider
+from ..providers.calls.calle import CalleCallProvider
+from ..providers.calls.guard import assert_live_call_allowed
+from ..config import settings
 from ..knowledge.service import build_retriever, compose_quote_context, load_context
 from .state import ProcurementAgentState
 
@@ -55,10 +58,43 @@ class ProcurementNodes:
                 "errors": ["Explicit quote-call approval is required."],
             }
         request = self._request(state)
-        self.audit.record(request.id, "quote_calls_approved")
+        if not self.audit.exists(request.id, "quote_calls_approved"):
+            self.audit.record(request.id, "quote_calls_approved")
         stored_quotes = []
         for supplier in self.suppliers.assigned_to(request.id):
             key = f"supplyscout:quote:{request.id}:{supplier.id}"
+            existing = self.attempts.for_operation(key)
+            if existing:
+                continue
+            if self.dependencies.provider.mode == "calle":
+                assert_live_call_allowed(
+                    self.dependencies.session, settings, request, supplier, "quote"
+                )
+                attempt = existing or self.attempts.add(CallAttempt(
+                    id=str(uuid4()), sourcing_request_id=request.id,
+                    supplier_id=supplier.id, call_type="quote",
+                    logical_idempotency_key=key, attempt_number=1, status="queued",
+                ))
+                self.dependencies.session.flush()
+                try:
+                    response = self._calle().start_quote_call(
+                        request,
+                        supplier,
+                        knowledge_context=compose_quote_context(
+                            load_context(self.dependencies.session, request.knowledge_chunk_ids)
+                        ),
+                    )
+                    call_id = response.get("id")
+                    if not isinstance(call_id, str) or not call_id:
+                        attempt.status = "failed"
+                        raise RuntimeError("CALL-E did not return a call identifier")
+                    attempt.provider_call_id = call_id
+                    attempt.status = self._provider_status(response)
+                    self.audit.record(request.id, "call_dispatched", {"call_type": "quote"})
+                except Exception:
+                    attempt.status = "failed"
+                    self.audit.record(request.id, "call_dispatch_failed", {"call_type": "quote"})
+                continue
             attempt = CallAttempt(
                 id=str(uuid4()), sourcing_request_id=request.id, supplier_id=supplier.id,
                 call_type="quote", logical_idempotency_key=key, attempt_number=1,
@@ -130,12 +166,49 @@ class ProcurementNodes:
         reservation = self.reservations.for_request(request.id)
         if reservation is None:
             raise RuntimeError("Reservation preview is required")
-        self.audit.record(request.id, "reservation_approved")
+        if not self.audit.exists(request.id, "reservation_approved"):
+            self.audit.record(request.id, "reservation_approved")
+        key = f"supplyscout:reservation:{request.id}:{supplier.id}"
+        existing = self.attempts.for_operation(key)
+        if self.dependencies.provider.mode == "calle":
+            assert_live_call_allowed(
+                self.dependencies.session, settings, request, supplier, "reservation"
+            )
+            if existing:
+                reservation.status = existing.status
+                request.status = "reservation_call"
+                return {"workflow_status": "reservation_call", "reservation_result": {"outcome": reservation.status, "supplier_reference": reservation.reservation_reference}, "errors": []}
+            attempt = existing or self.attempts.add(CallAttempt(
+                id=str(uuid4()), sourcing_request_id=request.id,
+                supplier_id=supplier.id, call_type="reservation",
+                logical_idempotency_key=key, attempt_number=1, status="queued",
+            ))
+            self.dependencies.session.flush()
+            try:
+                response = self._calle().start_reservation_call(request, quote, supplier)
+                call_id = response.get("id")
+                if not isinstance(call_id, str) or not call_id:
+                    attempt.status = "failed"
+                    reservation.status = "failed"
+                    raise RuntimeError("CALL-E did not return a call identifier")
+                attempt.provider_call_id = call_id
+                attempt.status = self._provider_status(response)
+                reservation.status = "calling"
+                request.status = "reservation_call"
+                self.audit.record(request.id, "reservation_call_started")
+                self.audit.record(request.id, "reservation_call_dispatched")
+                return {"workflow_status": "reservation_call", "reservation_result": {"outcome": "calling", "supplier_reference": None}, "errors": []}
+            except Exception:
+                attempt.status = "failed"
+                reservation.status = "failed"
+                request.status = "reservation_call"
+                self.audit.record(request.id, "reservation_call_failed")
+                return {"workflow_status": "reservation_call", "reservation_result": {"outcome": "failed", "supplier_reference": None}, "errors": ["Reservation call dispatch failed."]}
         self.audit.record(request.id, "reservation_call_started")
         attempt = CallAttempt(
             id=str(uuid4()), sourcing_request_id=request.id, supplier_id=supplier.id,
             call_type="reservation",
-            logical_idempotency_key=f"supplyscout:reservation:{request.id}:{quote.id}",
+            logical_idempotency_key=key,
             attempt_number=1, status="started",
         )
         self.attempts.add(attempt)
@@ -167,3 +240,16 @@ class ProcurementNodes:
         if quote is None:
             raise KeyError(state["selected_quote_id"])
         return quote
+
+    def _calle(self) -> CalleCallProvider:
+        provider = self.dependencies.provider
+        if not isinstance(provider, CalleCallProvider):
+            raise RuntimeError("CALL-E provider is unavailable")
+        return provider
+
+    @staticmethod
+    def _provider_status(response: dict) -> str:
+        status = response.get("status")
+        if status in {"failed", "no_answer"}:
+            return str(status)
+        return status if status in {"queued", "calling", "in_progress"} else "in_progress"

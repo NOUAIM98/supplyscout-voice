@@ -28,6 +28,7 @@ class ProcurementAgent:
             {
                 "context_retrieval": "context_retrieval",
                 "dispatch_supplier_calls": "dispatch_supplier_calls",
+                "normalize_quotes": "normalize_quotes",
                 "reservation_preview": "reservation_preview",
                 "reservation_call": "reservation_call",
                 "stop": END,
@@ -36,13 +37,23 @@ class ProcurementAgent:
         builder.add_edge("context_retrieval", "call_preview")
         builder.add_edge("call_preview", "awaiting_quote_approval")
         builder.add_edge("awaiting_quote_approval", END)
-        builder.add_edge("dispatch_supplier_calls", "normalize_quotes")
+        builder.add_conditional_edges(
+            "dispatch_supplier_calls",
+            lambda state: "normalize_quotes" if state["quotes"] else "stop",
+            {"normalize_quotes": "normalize_quotes", "stop": END},
+        )
         builder.add_edge("normalize_quotes", "rank_quotes")
         builder.add_edge("rank_quotes", "awaiting_human_selection")
         builder.add_edge("awaiting_human_selection", END)
         builder.add_edge("reservation_preview", "awaiting_reservation_approval")
         builder.add_edge("awaiting_reservation_approval", END)
-        builder.add_edge("reservation_call", "completed")
+        builder.add_conditional_edges(
+            "reservation_call",
+            lambda state: "completed"
+            if (state.get("reservation_result") or {}).get("outcome") != "calling"
+            else "stop",
+            {"completed": "completed", "stop": END},
+        )
         builder.add_edge("completed", END)
         self.graph = builder.compile()
 
@@ -87,4 +98,6 @@ class ProcurementAgent:
             return "reservation_preview"
         if status == "awaiting_reservation_approval" and state["reservation_approved"]:
             return "reservation_call"
+        if status == "supplier_calls_dispatched":
+            return "normalize_quotes"
         return "stop"

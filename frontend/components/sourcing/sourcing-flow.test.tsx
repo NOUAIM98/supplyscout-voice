@@ -9,6 +9,8 @@ import { RankingPanel } from "@/components/quotes/ranking-panel";
 import { ApprovalPanel } from "@/components/workflow/approval-panel";
 import { ReservationPanel, ReservationStage } from "@/components/workflow/reservation-panel";
 import { AgentActivity } from "@/components/workflow/agent-activity";
+import { CallProgress, RuntimeBadge, allCallsTerminal, hasActiveCalls } from "@/components/workflow/call-progress";
+import { queryClientDefaults } from "@/providers/query-provider";
 import type { RankingResponse, SourcingRequest, SupplierQuote } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -19,6 +21,42 @@ const quote = (overrides: Partial<SupplierQuote> = {}): SupplierQuote => ({
   condition: "new", quantity_available: 1, unit_price: "145.00", currency: "EUR",
   tax_included: "unknown", warranty_months: 12, pickup_available_today: "yes",
   delivery_eta: null, quote_valid_until: null, supplier_notes: null, ...overrides,
+});
+
+describe("Phase G1 live progress", () => {
+  const active = [{ id: "a1", call_type: "quote" as const, status: "calling", provider_call_id: "fictional-call-1" }];
+
+  it("keeps fake mode visibly labeled as demo", () => {
+    render(<RuntimeBadge runtime={{ call_provider_mode: "fake", live_calls_enabled: false }} />);
+    expect(screen.getByText("Demo supplier responses")).toBeVisible();
+  });
+
+  it("labels live mode only from backend runtime metadata", () => {
+    render(<RuntimeBadge runtime={{ call_provider_mode: "calle", live_calls_enabled: true }} />);
+    expect(screen.getByText("Live CALL-E")).toBeVisible();
+  });
+
+  it("shows active supplier progress without claiming completion", () => {
+    render(<CallProgress attempts={active} />);
+    expect(screen.getByText("Waiting for supplier responses")).toBeVisible();
+    expect(screen.getByText("0 of 1 completed")).toBeVisible();
+  });
+
+  it("stops polling eligibility when every call is terminal", () => {
+    expect(hasActiveCalls(active)).toBe(true);
+    expect(hasActiveCalls([{ ...active[0], status: "failed" }])).toBe(false);
+    expect(allCallsTerminal([{ ...active[0], status: "failed" }])).toBe(true);
+  });
+
+  it("shows live reservation waiting state", () => {
+    render(<CallProgress attempts={[{ ...active[0], call_type: "reservation" }]} />);
+    expect(screen.getByText("Contacting selected supplier…")).toBeVisible();
+    expect(screen.queryByText("Reservation confirmed")).not.toBeInTheDocument();
+  });
+
+  it("configures mutations with no automatic retry", () => {
+    expect(queryClientDefaults.mutations.retry).toBe(false);
+  });
 });
 
 const request: SourcingRequest = {

@@ -87,6 +87,8 @@ class CalleCallProvider:
         base_url: str = "https://api.heycall-e.com",
         recipients: Mapping[str, dict[str, Any]] | None = None,
         client: Any | None = None,
+        default_region: str | None = None,
+        default_locale: str | None = None,
     ) -> None:
         if not api_key:
             raise RuntimeError("CALLE_API_KEY is required when CALL_PROVIDER_MODE=calle")
@@ -94,6 +96,8 @@ class CalleCallProvider:
         self._base_url = base_url
         self._recipients = dict(recipients or {})
         self._client_instance = client
+        self._default_region = default_region
+        self._default_locale = default_locale
         self.provider_results: dict[str, dict[str, Any]] = {}
 
     def suppliers(self) -> Sequence[Supplier]:
@@ -170,20 +174,38 @@ class CalleCallProvider:
             raise ValueError("Selected quote does not belong to the sourcing request")
         if selected_quote.supplier_id != supplier.id:
             raise ValueError("Selected quote does not belong to the supplier")
-        recipient = self._validated_recipient(supplier)
-        response = self._client().calls.create(
+        response = self.start_reservation_call(
+            sourcing_request, selected_quote, supplier
+        )
+        return self.normalize_reservation_response(response)
+
+    def start_reservation_call(
+        self,
+        sourcing_request: SourcingRequest,
+        selected_quote: SupplierQuote,
+        supplier: Supplier,
+    ) -> dict[str, Any]:
+        if selected_quote.sourcing_request_id != sourcing_request.id:
+            raise ValueError("Selected quote does not belong to the sourcing request")
+        if selected_quote.supplier_id != supplier.id:
+            raise ValueError("Selected quote does not belong to the supplier")
+        return self._client().calls.create(
             task=self._reservation_task(sourcing_request, selected_quote),
-            recipient=recipient,
+            recipient=self._validated_recipient(supplier),
             recipient_result_schema=CALLE_RESERVATION_SCHEMA,
             metadata={
                 "workflow_type": "supplier_reservation",
                 "sourcing_request_id": sourcing_request.id,
                 "supplier_id": supplier.id,
             },
-            idempotency_key=(
-                f"supplyscout:reservation:{sourcing_request.id}:{selected_quote.id}"
+            idempotency_key=self.reservation_idempotency_key(
+                sourcing_request.id, supplier.id
             ),
         )
+
+    def normalize_reservation_response(
+        self, response: dict[str, Any]
+    ) -> dict[str, str | None]:
         structured = self._structured_result(response)
         if not isinstance(structured, dict):
             return {"outcome": "failed", "supplier_reference": None}
@@ -192,13 +214,17 @@ class CalleCallProvider:
             outcome = "unclear"
         reference = structured.get("supplier_reference")
         return {
-            "outcome": outcome,
+            "outcome": str(outcome),
             "supplier_reference": reference if isinstance(reference, str) else None,
         }
 
     @staticmethod
     def quote_idempotency_key(sourcing_request_id: str, supplier_id: str) -> str:
         return f"supplyscout:quote:{sourcing_request_id}:{supplier_id}"
+
+    @staticmethod
+    def reservation_idempotency_key(sourcing_request_id: str, supplier_id: str) -> str:
+        return f"supplyscout:reservation:{sourcing_request_id}:{supplier_id}"
 
     def normalize_quote_response(
         self,
@@ -256,6 +282,12 @@ class CalleCallProvider:
         if not supplier.authorized_for_calls:
             raise PermissionError("Supplier is not authorized for calls")
         recipient = self._recipients.get(supplier.id)
+        if recipient is None and self._default_region and self._default_locale:
+            recipient = {
+                "phones": [supplier.phone_e164],
+                "region": self._default_region,
+                "locale": self._default_locale,
+            }
         if not recipient:
             raise PermissionError("No authorized CALL-E recipient is configured")
         phones = recipient.get("phones")

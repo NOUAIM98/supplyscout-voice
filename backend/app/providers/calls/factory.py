@@ -22,4 +22,6 @@ def create_call_provider(
         base_url=settings.calle_base_url,
         recipients=recipients,
         client=client,
+        default_region=settings.calle_recipient_region,
+        default_locale=settings.calle_recipient_locale,
     )

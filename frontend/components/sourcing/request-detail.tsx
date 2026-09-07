@@ -15,9 +15,11 @@ import { RankingPanel } from "@/components/quotes/ranking-panel";
 import { AgentActivity } from "@/components/workflow/agent-activity";
 import { AgentStatus } from "@/components/workflow/agent-status";
 import { ReservationStage } from "@/components/workflow/reservation-panel";
+import { CallProgress, RuntimeBadge, hasActiveCalls } from "@/components/workflow/call-progress";
 
 export function RequestDetail({ id }: { id: string }) {
   const client = useQueryClient();
+  const runtime = useQuery({ queryKey: ["runtime"], queryFn: api.getRuntime, staleTime: 60_000 });
   const request = useQuery({ queryKey: ["request", id], queryFn: () => api.getRequest(id) });
   const workflow = useQuery({ queryKey: ["workflow", id], queryFn: () => api.getWorkflow(id) });
   const context = useQuery({ queryKey: ["context", id], queryFn: () => api.getContextPreview(id) });
@@ -26,10 +28,14 @@ export function RequestDetail({ id }: { id: string }) {
   const quotes = useQuery({ queryKey: ["quotes", id], queryFn: () => api.getQuotes(id), enabled: approved });
   const ranking = useQuery({ queryKey: ["ranking", id], queryFn: () => api.getRanking(id), enabled: Boolean(quotes.data?.length) });
   const activity = useQuery({ queryKey: ["activity", id], queryFn: () => api.getActivity(id) });
-  const approve = useMutation({ mutationFn: () => api.approveQuoteCalls(id), onSuccess: data => { client.setQueryData(["quotes", id], data); return Promise.all([client.invalidateQueries({ queryKey: ["workflow", id] }), client.invalidateQueries({ queryKey: ["ranking", id] }), client.invalidateQueries({ queryKey: ["activity", id] })]); } });
+  const live = runtime.data?.call_provider_mode === "calle" && runtime.data.live_calls_enabled;
+  const attempts = useQuery({ queryKey: ["call-attempts", id], queryFn: () => api.getCallAttempts(id), enabled: Boolean(live && approved) });
+  const activeCalls = hasActiveCalls(attempts.data ?? []);
+  useQuery({ queryKey: ["call-sync", id], enabled: Boolean(live && activeCalls), refetchInterval: query => hasActiveCalls(query.state.data?.attempts ?? []) ? 4000 : false, queryFn: async () => { const data = await api.syncCalls(id); client.setQueryData(["workflow", id], data.workflow); client.setQueryData(["call-attempts", id], data.attempts); if (["awaiting_human_selection", "completed"].includes(data.workflow.workflow_status)) { await Promise.all([client.invalidateQueries({ queryKey: ["quotes", id] }), client.invalidateQueries({ queryKey: ["ranking", id] }), client.invalidateQueries({ queryKey: ["activity", id] })]); } return data; } });
+  const approve = useMutation({ retry: false, mutationFn: () => api.approveQuoteCalls(id), onSuccess: data => { client.setQueryData(["quotes", id], data); return Promise.all([client.invalidateQueries({ queryKey: ["workflow", id] }), client.invalidateQueries({ queryKey: ["ranking", id] }), client.invalidateQueries({ queryKey: ["activity", id] }), client.invalidateQueries({ queryKey: ["call-attempts", id] })]); } });
   const select = useMutation({ mutationFn: (quoteId: string) => api.selectQuote(id, quoteId), onSuccess: data => { client.setQueryData(["workflow", id], data); return client.invalidateQueries({ queryKey: ["activity", id] }); } });
   const reservationPreview = useMutation({ mutationFn: () => api.getReservationPreview(id), onSuccess: data => { client.setQueryData(["workflow", id], data); return client.invalidateQueries({ queryKey: ["activity", id] }); } });
-  const reservationApproval = useMutation({ retry: false, mutationFn: () => api.approveReservation(id), onSuccess: data => { client.setQueryData(["workflow", id], data); return Promise.all([client.invalidateQueries({ queryKey: ["request", id] }), client.invalidateQueries({ queryKey: ["activity", id] })]); } });
+  const reservationApproval = useMutation({ retry: false, mutationFn: () => api.approveReservation(id), onSuccess: data => { client.setQueryData(["workflow", id], data); return Promise.all([client.invalidateQueries({ queryKey: ["request", id] }), client.invalidateQueries({ queryKey: ["activity", id] }), client.invalidateQueries({ queryKey: ["call-attempts", id] })]); } });
   const error = request.error || workflow.error || context.error || preview.error || approve.error || select.error || reservationPreview.error || reservationApproval.error;
   if (request.isLoading) return <DetailSkeleton />;
   if (!request.data) return <main className="mx-auto max-w-7xl px-5 py-10"><Alert>{error?.message ?? "Request not found"}</Alert></main>;
@@ -38,9 +44,10 @@ export function RequestDetail({ id }: { id: string }) {
   const reservationResult = workflow.data?.reservation_result;
   const visibleStatus = status.replaceAll("_", " ");
   return <main className="mx-auto max-w-7xl space-y-8 px-5 py-10 lg:px-8 lg:py-12">
-    <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end"><div><div className="flex flex-wrap items-center gap-3"><p className="eyebrow">Sourcing request</p><Badge><span className="status-dot mr-2" /> Demo supplier responses</Badge></div><h1 className="mt-3 text-4xl font-semibold tracking-[-.035em]">{request.data.part_name} for {request.data.vehicle_year} {request.data.vehicle_make} {request.data.vehicle_model}</h1><p className="mt-3 font-mono text-sm text-muted-foreground">{request.data.requested_reference}</p></div><Badge className="w-fit bg-card px-3 py-2">{visibleStatus}</Badge></div>
+    <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end"><div><div className="flex flex-wrap items-center gap-3"><p className="eyebrow">Sourcing request</p><RuntimeBadge runtime={runtime.data} /></div><h1 className="mt-3 text-4xl font-semibold tracking-[-.035em]">{request.data.part_name} for {request.data.vehicle_year} {request.data.vehicle_make} {request.data.vehicle_model}</h1><p className="mt-3 font-mono text-sm text-muted-foreground">{request.data.requested_reference}</p></div><Badge className="w-fit bg-card px-3 py-2">{visibleStatus}</Badge></div>
     <WorkflowStepper status={status} />
     <AgentStatus status={status} outcome={reservationResult?.outcome} />
+    {live && <CallProgress attempts={attempts.data ?? []} />}
     {error && <Alert>{error.message}</Alert>}
     <div className="grid gap-6 lg:grid-cols-[1.4fr_.6fr]">
       <div>{context.data ? <ContextPanel context={context.data} /> : <PanelSkeleton />}</div>
