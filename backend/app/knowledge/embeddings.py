@@ -38,3 +38,35 @@ class FakeEmbeddingProvider:
         if not length:
             raise ValueError("Embedding text cannot be empty")
         return [x / length for x in vector]
+
+
+class FastEmbedEmbeddingProvider:
+    """Local semantic embeddings backed by FastEmbed's ONNX runtime."""
+
+    dimensions = DIMENSIONS
+
+    def __init__(self, model_id: str = "BAAI/bge-small-en-v1.5", model=None) -> None:
+        self.model_id = model_id
+        if model is None:
+            from fastembed import TextEmbedding
+
+            model = TextEmbedding(model_name=model_id)
+        self._model = model
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        vectors = [vector.tolist() for vector in self._model.embed(texts)]
+        for vector in vectors:
+            validate_embedding(vector)
+        return vectors
+
+    def embed_query(self, text: str) -> list[float]:
+        vectors = self.embed_documents([text])
+        if not vectors:
+            raise ValueError("Embedding provider returned no query embedding")
+        return vectors[0]
+
+
+def create_embedding_provider(provider_name: str, model_id: str) -> EmbeddingProvider:
+    if provider_name != "fastembed":
+        raise ValueError("PostgreSQL RAG requires the configured FastEmbed provider")
+    return FastEmbedEmbeddingProvider(model_id=model_id)

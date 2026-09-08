@@ -161,8 +161,8 @@ def test_postgres_boundary_and_ddl(session_factory, monkeypatch):
         with pytest.raises(ValueError, match="PostgreSQL"):
             KnowledgeRepository(session, "real-model")
         monkeypatch.setattr(settings, "rag_mode", "postgres")
-        with pytest.raises(ValueError, match="real embedding provider"):
-            build_retriever(session)
+        with pytest.raises(ValueError, match="cannot use fake"):
+            build_retriever(session, FakeEmbeddingProvider())
     ddl = str(CreateTable(KnowledgeChunk.__table__).compile(dialect=postgresql.dialect()))
     assert "VECTOR(384)" in ddl
     query = select(KnowledgeChunk.id).order_by(KnowledgeChunk.embedding.cosine_distance([1.0] * 384)).limit(4)
@@ -175,7 +175,7 @@ def test_fake_disabled_in_production(session_factory, monkeypatch, client):
         with pytest.raises(ValueError, match="development/test"):
             build_retriever(session)
     request_id = create_request(client)
-    assert client.post(f"/api/v1/sourcing-requests/{request_id}/context-preview").status_code == 404
+    assert client.post(f"/api/v1/sourcing-requests/{request_id}/context-preview").status_code == 503
 
 
 def test_fake_without_api_key(monkeypatch):

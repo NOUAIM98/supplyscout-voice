@@ -83,8 +83,6 @@ def create_quote_preview(
 @router.post("/api/v1/sourcing-requests/{request_id}/context-preview")
 def context_preview(request_id: str, session: Session = Depends(get_db)) -> dict:
     request = _get_request(session, request_id)
-    if settings.app_env not in {"development", "test"}:
-        raise HTTPException(status_code=404, detail="Development preview is disabled")
     try:
         retriever = build_retriever(session)
     except ValueError:

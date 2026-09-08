@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db.models import KnowledgeChunk, SourcingRequest
-from .embeddings import DIMENSIONS, EmbeddingProvider, FakeEmbeddingProvider
+from .embeddings import (
+    DIMENSIONS, EmbeddingProvider, FakeEmbeddingProvider, create_embedding_provider,
+)
 from .repository import FakeKnowledgeRepository, KnowledgeRepository
 
 
@@ -33,8 +35,12 @@ def build_retriever(session: Session, embeddings: EmbeddingProvider | None = Non
             raise ValueError("Fake RAG is only available in development/test")
         provider = FakeEmbeddingProvider()
         return ProcurementKnowledgeRetriever(FakeKnowledgeRepository(session, provider.model_id), provider)
-    if embeddings is None or isinstance(embeddings, FakeEmbeddingProvider):
-        raise ValueError("PostgreSQL RAG requires an explicitly configured real embedding provider")
+    if embeddings is None:
+        embeddings = create_embedding_provider(
+            settings.rag_embedding_provider, settings.rag_embedding_model
+        )
+    if isinstance(embeddings, FakeEmbeddingProvider):
+        raise ValueError("PostgreSQL RAG cannot use fake embeddings")
     return ProcurementKnowledgeRetriever(KnowledgeRepository(session, embeddings.model_id), embeddings)
 
 

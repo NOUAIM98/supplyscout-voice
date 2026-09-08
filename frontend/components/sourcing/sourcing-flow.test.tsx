@@ -9,6 +9,7 @@ import { RankingPanel } from "@/components/quotes/ranking-panel";
 import { ApprovalPanel } from "@/components/workflow/approval-panel";
 import { ReservationPanel, ReservationStage } from "@/components/workflow/reservation-panel";
 import { AgentActivity } from "@/components/workflow/agent-activity";
+import { ContextPanel } from "@/components/sourcing/context-panel";
 import { CallProgress, RuntimeBadge, allCallsTerminal, hasActiveCalls } from "@/components/workflow/call-progress";
 import { queryClientDefaults } from "@/providers/query-provider";
 import type { RankingResponse, SourcingRequest, SupplierQuote } from "@/lib/types";
@@ -56,6 +57,16 @@ describe("Phase G1 live progress", () => {
 
   it("configures mutations with no automatic retry", () => {
     expect(queryClientDefaults.mutations.retry).toBe(false);
+  });
+});
+
+describe("Phase E3 semantic context", () => {
+  it("renders safe context provenance cards", () => {
+    render(<ContextPanel context={{ mode: "postgres", call_started: false, task_context: "safe", chunks: [{ id: "k1", title: "Compatibility confirmation policy", source_type: "vehicle_compatibility", source_ref: "demo:compatibility", snippet: "Confirm the exact reference with the supplier." }] }} />);
+    expect(screen.getByText("Compatibility confirmation policy")).toBeVisible();
+    expect(screen.getByText("vehicle compatibility")).toBeVisible();
+    expect(screen.getByText("Confirm the exact reference with the supplier.")).toBeVisible();
+    expect(screen.getByText("demo:compatibility")).toBeVisible();
   });
 });
 
@@ -186,5 +197,7 @@ describe("Phase F2 reservation flow", () => {
     render(<RankingPanel ranking={ranking} selectedQuoteId="q2" />);
     expect(screen.getByText("Recommended", { exact: true })).toBeVisible();
     expect(screen.getByText("Selected", { exact: true })).toBeVisible();
+    expect(screen.getAllByText("Recommended: Supplier A")).toHaveLength(2);
+    expect(screen.getByText("Selected: Supplier B")).toBeVisible();
   });
 });

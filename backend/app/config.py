@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     rag_mode: Literal["disabled", "fake", "postgres"] = "disabled"
+    rag_embedding_provider: Literal["fastembed"] = "fastembed"
+    rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     database_url: str | None = None
     call_provider_mode: Literal["fake", "calle"] = "fake"
     calle_api_key: str | None = None
