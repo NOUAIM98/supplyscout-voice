@@ -34,7 +34,7 @@ export default function Home() {
         <ol className="grid gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-5">
           {steps.map(([number, title, text]) => <li key={number} className="bg-card p-5"><span className="font-mono text-xs text-primary">{number}</span><h3 className="mt-8 font-semibold">{title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p></li>)}
         </ol>
-        <p className="mt-5 flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="size-4" /> Demo mode uses fictional supplier responses. No real calls run from this workspace.</p>
+        <p className="mt-5 flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="size-4" /> Demo mode uses fictional supplier responses. No real calls are placed from this workspace.</p>
       </div>
     </section>
   </main>;
