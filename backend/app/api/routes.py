@@ -27,7 +27,7 @@ provider = create_call_provider(settings)
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "call_provider_mode": settings.call_provider_mode}
+    return {"status": "ok"}
 
 
 @router.post(

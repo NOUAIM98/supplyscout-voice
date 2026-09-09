@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "development"
+    cors_allowed_origins: str = "http://localhost:3000"
     rag_mode: Literal["disabled", "fake", "postgres"] = "disabled"
     rag_embedding_provider: Literal["fastembed"] = "fastembed"
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
@@ -34,6 +35,17 @@ class Settings(BaseSettings):
             for phone in self.calle_allowed_recipients.split(",")
             if phone.strip()
         )
+
+    @property
+    def allowed_cors_origins(self) -> tuple[str, ...]:
+        origins = tuple(
+            origin.strip()
+            for origin in self.cors_allowed_origins.split(",")
+            if origin.strip()
+        )
+        if "*" in origins:
+            raise ValueError("CORS wildcard origins are not allowed")
+        return origins or ("http://localhost:3000",)
 
 
 settings = Settings()

@@ -41,7 +41,7 @@ def approve_quotes(client: TestClient, request_id: str) -> list[dict]:
 def test_health_returns_200(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "call_provider_mode": "fake"}
+    assert response.json() == {"status": "ok"}
 
 
 def test_settings_default_to_fake_without_calle_api_key(monkeypatch) -> None:
