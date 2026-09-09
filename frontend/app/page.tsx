@@ -24,7 +24,7 @@ export default function Home() {
         <div className="mt-14 space-y-6">
           <div className="flex gap-4"><ShieldCheck className="mt-1 size-5 text-blue-400" /><div><p className="font-medium">Human approval before calls</p><p className="mt-1 text-sm leading-6 text-slate-400">Every supplier conversation starts with an explicit decision.</p></div></div>
           <div className="flex gap-4"><FileSearch className="mt-1 size-5 text-blue-400" /><div><p className="font-medium">Evidence stays traceable</p><p className="mt-1 text-sm leading-6 text-slate-400">Context, source references, and uncertainty remain visible.</p></div></div>
-          <div className="flex gap-4"><Scale className="mt-1 size-5 text-blue-400" /><div><p className="font-medium">Recommendation stays separate</p><p className="mt-1 text-sm leading-6 text-slate-400">SupplyScout ranks. Your team selects.</p></div></div>
+          <div className="flex gap-4"><Scale className="mt-1 size-5 text-blue-400" /><div><p className="font-medium">Recommendation stays separate</p><p className="mt-1 text-sm leading-6 text-slate-400">SupplyScout ranks each offer. Your team makes the final selection.</p></div></div>
         </div>
       </div>
     </section>
