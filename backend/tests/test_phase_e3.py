@@ -39,9 +39,11 @@ def test_configured_provider_factory(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
         "backend.app.knowledge.embeddings.FastEmbedEmbeddingProvider",
-        lambda model_id: (model_id, sentinel),
+        lambda model_id, cache_dir=None: (model_id, cache_dir, sentinel),
     )
-    assert create_embedding_provider("fastembed", "model") == ("model", sentinel)
+    assert create_embedding_provider("fastembed", "model", "/tmp/cache") == (
+        "model", "/tmp/cache", sentinel,
+    )
     with pytest.raises(ValueError, match="FastEmbed"):
         create_embedding_provider("unknown", "model")
 

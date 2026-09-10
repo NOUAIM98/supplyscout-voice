@@ -37,7 +37,8 @@ def build_retriever(session: Session, embeddings: EmbeddingProvider | None = Non
         return ProcurementKnowledgeRetriever(FakeKnowledgeRepository(session, provider.model_id), provider)
     if embeddings is None:
         embeddings = create_embedding_provider(
-            settings.rag_embedding_provider, settings.rag_embedding_model
+            settings.rag_embedding_provider, settings.rag_embedding_model,
+            settings.rag_embedding_cache_dir,
         )
     if isinstance(embeddings, FakeEmbeddingProvider):
         raise ValueError("PostgreSQL RAG cannot use fake embeddings")

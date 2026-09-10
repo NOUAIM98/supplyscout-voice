@@ -105,7 +105,7 @@ describe("Phase F1 sourcing flow", () => {
 
   it("keeps unknown facts visible and selection manual", async () => {
     const onSelect = vi.fn();
-    render(<QuoteComparison quotes={[quote({ in_stock: "unknown", warranty_months: null, delivery_eta: null })]} selectedQuoteId={null} onSelect={onSelect} />);
+    render(<QuoteComparison quotes={[quote({ in_stock: "unknown", warranty_months: null, delivery_eta: null })]} selectedQuoteId={null} selectionAllowed onSelect={onSelect} />);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThanOrEqual(3);
     expect(onSelect).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Select this supplier" }));
@@ -121,6 +121,36 @@ describe("Phase F1 sourcing flow", () => {
     expect(screen.getByText("Backend explanation")).toBeVisible();
     expect(screen.getByText("Recommended ≠ Selected")).toBeVisible();
     expect(screen.queryByText("Selected", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("enables supplier selection before the backend workflow locks it", () => {
+    render(<QuoteComparison quotes={[quote()]} selectedQuoteId={null} selectionAllowed onSelect={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Select this supplier" })).toBeEnabled();
+  });
+
+  it("locks other suppliers after reservation processing begins", () => {
+    render(<QuoteComparison quotes={[quote(), quote({ id: "q2", supplier_id: "s2", supplier_name: "Supplier B" })]} selectedQuoteId="q1" selectionAllowed={false} onSelect={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Selected supplier" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Selection locked" })).toBeDisabled();
+  });
+
+  it("keeps the completed supplier visible and prevents selecting alternatives", async () => {
+    const onSelect = vi.fn();
+    render(<QuoteComparison quotes={[
+      quote(),
+      quote({ id: "q2", supplier_id: "s2", supplier_name: "Supplier B" }),
+      quote({ id: "q3", supplier_id: "s3", supplier_name: "Supplier C" }),
+    ]} selectedQuoteId="q1" selectionAllowed={false} onSelect={onSelect} />);
+
+    expect(screen.getByText("Supplier A").closest("div[class*='border-primary']")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Selected supplier" })).toBeDisabled();
+    const locked = screen.getAllByRole("button", { name: "Selection locked" });
+    expect(locked).toHaveLength(2);
+    expect(locked[0]).toBeDisabled();
+    expect(locked[1]).toBeDisabled();
+    await userEvent.click(locked[0]);
+    await userEvent.click(locked[1]);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });
 

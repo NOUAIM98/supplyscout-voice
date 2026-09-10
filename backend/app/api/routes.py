@@ -165,7 +165,7 @@ def select_quote(
 ) -> ProcurementAgentState:
     request = _get_request(session, request_id)
     state = _workflow_state(session, request)
-    if state["workflow_status"] != "awaiting_human_selection":
+    if _quote_selection_locked(session, request):
         raise HTTPException(status_code=409, detail="Quote selection is not available")
     quote = QuoteRepository(session).get(payload.quote_id)
     if quote is None or quote.sourcing_request_id != request_id:
@@ -343,6 +343,33 @@ def _workflow_state(session: Session, request: SourcingRequest) -> ProcurementAg
         },
         "errors": [],
     }
+
+
+def _quote_selection_locked(session: Session, request: SourcingRequest) -> bool:
+    if request.status != "awaiting_human_selection":
+        return True
+    if ReservationRepository(session).for_request(request.id) is not None:
+        return True
+    if any(
+        attempt.call_type == "reservation"
+        for attempt in CallAttemptRepository(session).list_for_request(request.id)
+    ):
+        return True
+    audit = AuditRepository(session)
+    return any(
+        audit.exists(request.id, event_type)
+        for event_type in (
+            "reservation_preview_prepared",
+            "reservation_approved",
+            "reservation_call_started",
+            "reservation_call_dispatched",
+            "reservation_call_completed",
+            "reservation_call_failed",
+            "reservation_outcome_stored",
+            "reservation_completed",
+            "workflow_completed",
+        )
+    )
 
 
 def _quote_responses(session: Session, request_id: str) -> list[SupplierQuoteRead]:

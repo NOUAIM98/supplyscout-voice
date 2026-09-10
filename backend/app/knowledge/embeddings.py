@@ -45,12 +45,13 @@ class FastEmbedEmbeddingProvider:
 
     dimensions = DIMENSIONS
 
-    def __init__(self, model_id: str = "BAAI/bge-small-en-v1.5", model=None) -> None:
+    def __init__(self, model_id: str = "BAAI/bge-small-en-v1.5",
+                 cache_dir: str | None = None, model=None) -> None:
         self.model_id = model_id
         if model is None:
             from fastembed import TextEmbedding
 
-            model = TextEmbedding(model_name=model_id)
+            model = TextEmbedding(model_name=model_id, cache_dir=cache_dir)
         self._model = model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -66,7 +67,8 @@ class FastEmbedEmbeddingProvider:
         return vectors[0]
 
 
-def create_embedding_provider(provider_name: str, model_id: str) -> EmbeddingProvider:
+def create_embedding_provider(provider_name: str, model_id: str,
+                              cache_dir: str | None = None) -> EmbeddingProvider:
     if provider_name != "fastembed":
         raise ValueError("PostgreSQL RAG requires the configured FastEmbed provider")
-    return FastEmbedEmbeddingProvider(model_id=model_id)
+    return FastEmbedEmbeddingProvider(model_id=model_id, cache_dir=cache_dir)
