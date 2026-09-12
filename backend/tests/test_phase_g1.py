@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -190,9 +191,11 @@ def test_provider_failure_is_persisted_safely(live_app, client) -> None:
 
 
 def test_ambiguous_dispatch_failure_is_persisted_without_retry(
-    live_app, client, session_factory
+    live_app, client, session_factory, caplog, monkeypatch
 ) -> None:
     request_id, _, stub = live_app
+    monkeypatch.setattr(logging.getLogger("backend.app.agent.nodes"), "disabled", False)
+    caplog.set_level(logging.ERROR, logger="backend.app.agent.nodes")
 
     def fail_create(**kwargs: Any) -> dict[str, Any]:
         raise TimeoutError("fictional provider timeout")
@@ -200,11 +203,58 @@ def test_ambiguous_dispatch_failure_is_persisted_without_retry(
     stub.calls.create = fail_create
     response = client.post(f"/api/v1/sourcing-requests/{request_id}/approve-quote-calls")
     assert response.status_code == 200
+    assert caplog.text.count("CALL-E quote dispatch failed") == 3
+    assert f"request_id={request_id}" in caplog.text
+    assert "exception_type=TimeoutError" in caplog.text
+    assert "exception_message=fictional provider timeout" in caplog.text
+    assert "fictional-test-key" not in caplog.text
+    assert all(supplier.phone_e164 not in caplog.text for supplier in live_app[1])
+    assert "Authorization" not in caplog.text
     with session_factory() as session:
         attempts = list(session.scalars(select(CallAttempt)))
         assert len(attempts) == 3
         assert all(item.status == "failed" and item.provider_call_id is None for item in attempts)
     assert client.post(f"/api/v1/sourcing-requests/{request_id}/approve-quote-calls").status_code == 409
+
+
+def test_reservation_dispatch_failure_is_logged_safely_without_retry(
+    live_app, client, session_factory, caplog, monkeypatch
+) -> None:
+    request_id, suppliers, stub = live_app
+    monkeypatch.setattr(logging.getLogger("backend.app.agent.nodes"), "disabled", False)
+    caplog.set_level(logging.ERROR, logger="backend.app.agent.nodes")
+    quotes = complete_quotes(request_id, stub, client)
+    client.post(
+        f"/api/v1/sourcing-requests/{request_id}/select-quote",
+        json={"quote_id": quotes[0]["id"]},
+    )
+
+    def fail_create(**kwargs: Any) -> dict[str, Any]:
+        raise ConnectionError("fictional reservation connection error")
+
+    before = len(stub.calls.created)
+    stub.calls.create = fail_create
+    response = client.post(f"/api/v1/sourcing-requests/{request_id}/approve-reservation")
+
+    assert response.status_code == 200
+    assert response.json()["reservation_result"]["outcome"] == "failed"
+    assert "CALL-E reservation dispatch failed" in caplog.text
+    assert f"request_id={request_id}" in caplog.text
+    assert "exception_type=ConnectionError" in caplog.text
+    assert "exception_message=fictional reservation connection error" in caplog.text
+    assert "fictional-test-key" not in caplog.text
+    assert all(supplier.phone_e164 not in caplog.text for supplier in suppliers)
+    assert "Authorization" not in caplog.text
+    assert len(stub.calls.created) == before
+    with session_factory() as session:
+        attempt = session.scalar(
+            select(CallAttempt).where(CallAttempt.call_type == "reservation")
+        )
+        reservation = session.scalar(select(Reservation))
+        assert attempt is not None
+        assert attempt.status == "failed" and attempt.provider_call_id is None
+        assert reservation is not None and reservation.status == "failed"
+    assert client.post(f"/api/v1/sourcing-requests/{request_id}/approve-reservation").status_code == 409
 
 
 def complete_quotes(request_id: str, stub: StubClient, client: TestClient) -> list[dict]:

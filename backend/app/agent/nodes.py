@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -14,6 +15,9 @@ from ..providers.calls.guard import assert_live_call_allowed
 from ..config import settings
 from ..knowledge.service import build_retriever, compose_quote_context, load_context
 from .state import ProcurementAgentState
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,7 +95,13 @@ class ProcurementNodes:
                     attempt.provider_call_id = call_id
                     attempt.status = self._provider_status(response)
                     self.audit.record(request.id, "call_dispatched", {"call_type": "quote"})
-                except Exception:
+                except Exception as exc:
+                    logger.exception(
+                        "CALL-E quote dispatch failed request_id=%s exception_type=%s exception_message=%s",
+                        request.id,
+                        type(exc).__name__,
+                        str(exc),
+                    )
                     attempt.status = "failed"
                     self.audit.record(request.id, "call_dispatch_failed", {"call_type": "quote"})
                 continue
@@ -198,7 +208,13 @@ class ProcurementNodes:
                 self.audit.record(request.id, "reservation_call_started")
                 self.audit.record(request.id, "reservation_call_dispatched")
                 return {"workflow_status": "reservation_call", "reservation_result": {"outcome": "calling", "supplier_reference": None}, "errors": []}
-            except Exception:
+            except Exception as exc:
+                logger.exception(
+                    "CALL-E reservation dispatch failed request_id=%s exception_type=%s exception_message=%s",
+                    request.id,
+                    type(exc).__name__,
+                    str(exc),
+                )
                 attempt.status = "failed"
                 reservation.status = "failed"
                 request.status = "reservation_call"
