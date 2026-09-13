@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,6 +22,9 @@ from ..schemas.quotes import QuoteSelection, RankingEntry, RankingResponse, Supp
 from ..schemas.sourcing import SourcingRequestCreate, SourcingRequestRead
 
 
+logger = logging.getLogger(__name__)
+
+
 router = APIRouter()
 provider = create_call_provider(settings)
 
@@ -42,15 +46,33 @@ def create_sourcing_request(
     request = requests.add(SourcingRequest(
         id=str(uuid4()), status="request_created", **payload.model_dump()
     ))
-    available_suppliers = (
-        provider.suppliers()
-        if provider.mode == "fake"
-        else [
-            supplier for supplier in suppliers.all()
+    if provider.mode == "fake":
+        available_suppliers = provider.suppliers()
+    else:
+        all_suppliers = suppliers.all()
+        allowed_recipients = settings.allowed_calle_recipients
+        available_suppliers = [
+            supplier for supplier in all_suppliers
             if supplier.authorized_for_calls
-            and supplier.phone_e164 in settings.allowed_calle_recipients
+            and supplier.phone_e164 in allowed_recipients
         ]
-    )
+        logger.info(
+            "CALL-E supplier matching total_suppliers=%d authorized_suppliers=%d "
+            "allowed_recipient_count=%d matched_suppliers=%d",
+            len(all_suppliers),
+            sum(bool(supplier.authorized_for_calls) for supplier in all_suppliers),
+            len(allowed_recipients),
+            len(available_suppliers),
+        )
+        for index, supplier in enumerate(all_suppliers):
+            logger.info(
+                "CALL-E supplier matching candidate_index=%d authorized_for_calls=%s "
+                "phone_e164_present=%s phone_e164_allowlisted=%s",
+                index,
+                bool(supplier.authorized_for_calls),
+                bool(supplier.phone_e164),
+                supplier.phone_e164 in allowed_recipients,
+            )
     for supplier in available_suppliers:
         stored = suppliers.add(supplier)
         session.flush()

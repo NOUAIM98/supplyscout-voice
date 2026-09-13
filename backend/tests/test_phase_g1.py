@@ -10,6 +10,7 @@ from sqlalchemy import select
 from backend.app.api import routes
 from backend.app.config import Settings
 from backend.app.db.models import AuditEvent, CallAttempt, Reservation, SourcingRequest, Supplier
+from backend.app.db.repositories import SupplierRepository
 from backend.app.providers.calls.calle import CalleCallProvider
 from backend.app.providers.calls.fake import FakeCallProvider
 from backend.app.providers.calls.guard import LiveCallBlocked, assert_live_call_allowed, mask_phone
@@ -130,6 +131,52 @@ def test_live_disabled_application_dry_run_creates_no_calls(live_app, monkeypatc
     assert response.status_code == 403
     assert response.json()["detail"] == "Live calls are disabled"
     assert stub.calls.created == []
+
+
+def test_live_request_creation_logs_safe_supplier_matching_diagnostics(
+    client, db_session, monkeypatch, caplog
+) -> None:
+    matching_phone = "+12025550111"
+    unmatched_phone = "+12025550112"
+    unauthorized_phone = "+12025550113"
+    db_session.add_all([
+        Supplier(id="matching", name="A", phone_e164=matching_phone, authorized_for_calls=True),
+        Supplier(id="unmatched", name="B", phone_e164=unmatched_phone, authorized_for_calls=True),
+        Supplier(id="unauthorized", name="C", phone_e164=unauthorized_phone, authorized_for_calls=False),
+    ])
+    db_session.commit()
+    provider = CalleCallProvider(
+        api_key="diagnostic-test-key",
+        default_region="US",
+        default_locale="en-US",
+        client=StubClient(),
+    )
+    monkeypatch.setattr(routes, "provider", provider)
+    monkeypatch.setattr(routes.settings, "calle_allowed_recipients", matching_phone)
+    route_logger = logging.getLogger("backend.app.api.routes")
+    monkeypatch.setattr(route_logger, "disabled", False)
+    caplog.set_level(logging.INFO, logger="backend.app.api.routes")
+
+    request_id = create_request(client)
+
+    messages = [record.getMessage() for record in caplog.records if record.name == route_logger.name]
+    assert messages == [
+        "CALL-E supplier matching total_suppliers=3 authorized_suppliers=2 "
+        "allowed_recipient_count=1 matched_suppliers=1",
+        "CALL-E supplier matching candidate_index=0 authorized_for_calls=True "
+        "phone_e164_present=True phone_e164_allowlisted=True",
+        "CALL-E supplier matching candidate_index=1 authorized_for_calls=True "
+        "phone_e164_present=True phone_e164_allowlisted=False",
+        "CALL-E supplier matching candidate_index=2 authorized_for_calls=False "
+        "phone_e164_present=True phone_e164_allowlisted=False",
+    ]
+    assert {supplier.id for supplier in SupplierRepository(db_session).assigned_to(request_id)} == {"matching"}
+    logged = caplog.text
+    assert matching_phone not in logged
+    assert unmatched_phone not in logged
+    assert unauthorized_phone not in logged
+    assert "diagnostic-test-key" not in logged
+    assert "Authorization" not in logged
 
 
 def test_live_dispatch_is_nonblocking_idempotent_and_persists_ids(live_app, client, session_factory) -> None:
