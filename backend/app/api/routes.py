@@ -56,7 +56,7 @@ def create_sourcing_request(
             if supplier.authorized_for_calls
             and supplier.phone_e164 in allowed_recipients
         ]
-        logger.info(
+        logger.warning(
             "CALL-E supplier matching total_suppliers=%d authorized_suppliers=%d "
             "allowed_recipient_count=%d matched_suppliers=%d",
             len(all_suppliers),
@@ -65,7 +65,7 @@ def create_sourcing_request(
             len(available_suppliers),
         )
         for index, supplier in enumerate(all_suppliers):
-            logger.info(
+            logger.warning(
                 "CALL-E supplier matching candidate_index=%d authorized_for_calls=%s "
                 "phone_e164_present=%s phone_e164_allowlisted=%s",
                 index,
