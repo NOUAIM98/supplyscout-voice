@@ -1,7 +1,10 @@
+from collections import defaultdict, deque
 from datetime import datetime, timezone
+from threading import Lock
+from time import monotonic
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from ..agent.graph import ProcurementAgent
@@ -12,10 +15,12 @@ from ..db.models import SourcingRequest, Supplier, SupplierQuote
 from ..db.repositories import AuditRepository, CallAttemptRepository, QuoteRepository, ReservationRepository
 from ..db.repositories import SourcingRequestRepository, SupplierRepository
 from ..db.session import get_db
-from ..domain.ranking import rank_quotes
+from ..domain.ranking import quote_ineligibility_reasons, rank_quotes
+from ..knowledge.demo import demo_context_preview
 from ..knowledge.service import build_retriever, compose_quote_context, provenance
 from ..providers.calls.factory import create_call_provider
 from ..providers.calls.calle import CalleCallProvider, CalleResultError
+from ..providers.calls.fake import FakeCallProvider
 from ..providers.calls.guard import LiveCallBlocked, assert_live_call_allowed
 from ..schemas.quotes import QuoteSelection, RankingEntry, RankingResponse, SupplierQuoteRead
 from ..schemas.sourcing import SourcingRequestCreate, SourcingRequestRead
@@ -23,6 +28,8 @@ from ..schemas.sourcing import SourcingRequestCreate, SourcingRequestRead
 
 router = APIRouter()
 provider = create_call_provider(settings)
+_demo_create_attempts: dict[str, deque[float]] = defaultdict(deque)
+_demo_create_lock = Lock()
 
 
 @router.get("/health")
@@ -37,14 +44,38 @@ def health() -> dict[str, str]:
 def create_sourcing_request(
     payload: SourcingRequestCreate, session: Session = Depends(get_db)
 ) -> SourcingRequest:
+    if settings.portfolio_demo_only:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the isolated fictional demo API is enabled",
+        )
+    return _create_sourcing_request(payload, session, provider, demo=False)
+
+
+@router.post(
+    "/api/v1/demo/sourcing-requests", response_model=SourcingRequestRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_demo_sourcing_request(
+    payload: SourcingRequestCreate,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> SourcingRequest:
+    _enforce_demo_create_rate_limit(request)
+    return _create_sourcing_request(payload, session, FakeCallProvider(), demo=True)
+
+
+def _create_sourcing_request(
+    payload: SourcingRequestCreate, session: Session, call_provider, *, demo: bool
+) -> SourcingRequest:
     requests = SourcingRequestRepository(session)
     suppliers = SupplierRepository(session)
     request = requests.add(SourcingRequest(
         id=str(uuid4()), status="request_created", **payload.model_dump()
     ))
     available_suppliers = (
-        provider.suppliers()
-        if provider.mode == "fake"
+        call_provider.suppliers()
+        if call_provider.mode == "fake"
         else [
             supplier for supplier in suppliers.all()
             if supplier.authorized_for_calls
@@ -56,8 +87,26 @@ def create_sourcing_request(
         session.flush()
         requests.assign_supplier(request.id, stored.id)
     AuditRepository(session).record(request.id, "request_created")
+    if demo:
+        AuditRepository(session).record(request.id, "demo_request_created")
     session.flush()
     return request
+
+
+def _enforce_demo_create_rate_limit(request: Request) -> None:
+    client = request.client.host if request.client else "unknown"
+    now = monotonic()
+    cutoff = now - settings.demo_create_rate_window_seconds
+    with _demo_create_lock:
+        attempts = _demo_create_attempts[client]
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if len(attempts) >= settings.demo_create_rate_limit:
+            raise HTTPException(
+                status_code=429,
+                detail="Demo request limit reached. Please try again later.",
+            )
+        attempts.append(now)
 
 
 @router.get(
@@ -72,17 +121,29 @@ def get_sourcing_request(
 @router.post("/api/v1/sourcing-requests/{request_id}/quote-preview")
 def create_quote_preview(
     request_id: str, session: Session = Depends(get_db)
-) -> ProcurementAgentState:
+) -> dict:
     request = _get_request(session, request_id)
     state = _workflow_state(session, request)
     if state["workflow_status"] == "request_created":
-        state = _agent(session).run(state)
-    return state
+        state = _agent(session, request).run(state)
+    suppliers = SupplierRepository(session).assigned_to(request.id)
+    return {
+        **state,
+        "call_preview": {
+            "demo_mode": _is_demo_request(session, request.id),
+            "requested_reference": request.requested_reference,
+            "quantity": request.quantity,
+            "supplier_count": len(suppliers),
+            "supplier_names": [supplier.name for supplier in suppliers],
+        },
+    }
 
 
 @router.post("/api/v1/sourcing-requests/{request_id}/context-preview")
 def context_preview(request_id: str, session: Session = Depends(get_db)) -> dict:
     request = _get_request(session, request_id)
+    if _is_demo_request(session, request.id):
+        return demo_context_preview(request.requested_reference)
     try:
         retriever = build_retriever(session)
     except ValueError:
@@ -100,11 +161,12 @@ def approve_quote_calls(
     request_id: str, session: Session = Depends(get_db)
 ) -> list[SupplierQuoteRead]:
     request = _get_request(session, request_id)
+    call_provider = _provider_for_request(session, request.id)
     state = _workflow_state(session, request)
     if state["workflow_status"] == "request_created":
-        state = _agent(session).run(state)
+        state = _agent(session, request, call_provider).run(state)
     if state["workflow_status"] == "awaiting_quote_approval":
-        if provider.mode == "calle":
+        if call_provider.mode == "calle":
             audit = AuditRepository(session)
             if not audit.exists(request.id, "quote_calls_approved"):
                 audit.record(request.id, "quote_calls_approved")
@@ -115,7 +177,7 @@ def approve_quote_calls(
             except LiveCallBlocked as exc:
                 raise HTTPException(status_code=403, detail=str(exc)) from None
         try:
-            _agent(session).run({**state, "quote_call_approved": True})
+            _agent(session, request, call_provider).run({**state, "quote_call_approved": True})
         except LiveCallBlocked as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from None
         request.updated_at = datetime.now(timezone.utc)
@@ -146,6 +208,8 @@ def get_ranking(request_id: str, session: Session = Depends(get_db)) -> RankingR
         raise HTTPException(status_code=409, detail="Quotes are not ready")
     suppliers = {s.id: s for s in SupplierRepository(session).assigned_to(request_id)}
     ranked = rank_quotes(request, quotes, suppliers)
+    if not ranked:
+        raise HTTPException(status_code=409, detail="No eligible supplier quotes are available")
     winner = ranked[0]
     return RankingResponse(
         sourcing_request_id=request_id,
@@ -170,9 +234,12 @@ def select_quote(
     quote = QuoteRepository(session).get(payload.quote_id)
     if quote is None or quote.sourcing_request_id != request_id:
         raise HTTPException(status_code=404, detail="Quote not found")
+    reasons = quote_ineligibility_reasons(request, quote)
+    if reasons:
+        raise HTTPException(status_code=409, detail="Selected quote is not eligible")
     request.selected_quote_id = quote.id
     session.flush()
-    return _agent(session).run({**state, "selected_quote_id": quote.id})
+    return _agent(session, request).run({**state, "selected_quote_id": quote.id})
 
 
 @router.post("/api/v1/sourcing-requests/{request_id}/reservation-preview")
@@ -184,7 +251,7 @@ def create_reservation_preview(
     if not state["selected_quote_id"]:
         raise HTTPException(status_code=409, detail="Explicit quote selection is required")
     if state["workflow_status"] == "awaiting_human_selection":
-        state = _agent(session).run(state)
+        state = _agent(session, request).run(state)
     if state["workflow_status"] != "awaiting_reservation_approval":
         raise HTTPException(status_code=409, detail="Reservation preview is not available")
     return state
@@ -195,10 +262,11 @@ def approve_reservation(
     request_id: str, session: Session = Depends(get_db)
 ) -> ProcurementAgentState:
     request = _get_request(session, request_id)
+    call_provider = _provider_for_request(session, request.id)
     state = _workflow_state(session, request)
     if state["workflow_status"] != "awaiting_reservation_approval":
         raise HTTPException(status_code=409, detail="Reservation approval is not available")
-    if provider.mode == "calle":
+    if call_provider.mode == "calle":
         quote = QuoteRepository(session).get(str(request.selected_quote_id))
         if quote is None:
             raise HTTPException(status_code=409, detail="Selected quote is required")
@@ -214,7 +282,7 @@ def approve_reservation(
         except LiveCallBlocked as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from None
     try:
-        return _agent(session).run({**state, "reservation_approved": True})
+        return _agent(session, request, call_provider).run({**state, "reservation_approved": True})
     except LiveCallBlocked as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from None
 
@@ -256,7 +324,8 @@ def get_call_attempts(request_id: str, session: Session = Depends(get_db)) -> li
 @router.post("/api/v1/sourcing-requests/{request_id}/sync-calls")
 def sync_calls(request_id: str, session: Session = Depends(get_db)) -> dict:
     request = _get_request(session, request_id)
-    if not isinstance(provider, CalleCallProvider):
+    call_provider = _provider_for_request(session, request.id)
+    if not isinstance(call_provider, CalleCallProvider):
         raise HTTPException(status_code=409, detail="Call synchronization is only available in CALL-E mode")
     attempts_repo = CallAttemptRepository(session)
     quotes = QuoteRepository(session)
@@ -268,7 +337,7 @@ def sync_calls(request_id: str, session: Session = Depends(get_db)) -> dict:
         if attempt.status not in {"queued", "calling", "in_progress"} or not attempt.provider_call_id:
             continue
         try:
-            response = provider.get_call(attempt.provider_call_id)
+            response = call_provider.get_call(attempt.provider_call_id)
         except Exception:
             attempt.status = "failed"
             continue
@@ -279,7 +348,7 @@ def sync_calls(request_id: str, session: Session = Depends(get_db)) -> dict:
         if attempt.call_type == "quote":
             if provider_status == "completed":
                 try:
-                    quote = provider.normalize_quote_response(response, request, suppliers[attempt.supplier_id])
+                    quote = call_provider.normalize_quote_response(response, request, suppliers[attempt.supplier_id])
                     quotes.add(quote)
                     attempt.status = "completed"
                     audit.record(request_id, "call_completed", {"call_type": "quote"})
@@ -293,7 +362,7 @@ def sync_calls(request_id: str, session: Session = Depends(get_db)) -> dict:
             if reservation is None:
                 attempt.status = "failed"
                 continue
-            result = provider.normalize_reservation_response(response) if provider_status == "completed" else {"outcome": provider_status, "supplier_reference": None}
+            result = call_provider.normalize_reservation_response(response) if provider_status == "completed" else {"outcome": provider_status, "supplier_reference": None}
             reservation.status = str(result["outcome"])
             reservation.reservation_reference = result["supplier_reference"]
             attempt.status = str(result["outcome"])
@@ -304,21 +373,39 @@ def sync_calls(request_id: str, session: Session = Depends(get_db)) -> dict:
     session.flush()
     quote_attempts = [item for item in attempts if item.call_type == "quote"]
     if quote_attempts and all(item.status not in {"queued", "calling", "in_progress"} for item in quote_attempts) and quotes.list_for_request(request_id) and request.status == "supplier_calls_dispatched":
-        _agent(session).run(_workflow_state(session, request))
+        _agent(session, request, call_provider).run(_workflow_state(session, request))
     return {
         "workflow": _workflow_state(session, request),
         "attempts": _attempt_responses(attempts),
     }
 
 
-def _agent(session: Session) -> ProcurementAgent:
-    return ProcurementAgent(AgentDependencies(session=session, provider=provider))
+def _agent(
+    session: Session, request: SourcingRequest, call_provider=None
+) -> ProcurementAgent:
+    return ProcurementAgent(AgentDependencies(
+        session=session,
+        provider=call_provider or _provider_for_request(session, request.id),
+    ))
+
+
+def _is_demo_request(session: Session, request_id: str) -> bool:
+    return AuditRepository(session).exists(request_id, "demo_request_created")
+
+
+def _provider_for_request(session: Session, request_id: str):
+    return FakeCallProvider() if _is_demo_request(session, request_id) else provider
 
 
 def _get_request(session: Session, request_id: str) -> SourcingRequest:
     request = SourcingRequestRepository(session).get(request_id)
     if request is None:
         raise HTTPException(status_code=404, detail="Sourcing request not found")
+    if settings.portfolio_demo_only and not _is_demo_request(session, request.id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only fictional demo requests are available",
+        )
     return request
 
 
@@ -373,13 +460,15 @@ def _quote_selection_locked(session: Session, request: SourcingRequest) -> bool:
 
 
 def _quote_responses(session: Session, request_id: str) -> list[SupplierQuoteRead]:
+    request = _get_request(session, request_id)
     suppliers = {s.id: s for s in SupplierRepository(session).assigned_to(request_id)}
-    return [_quote_response(quote, suppliers) for quote in QuoteRepository(session).list_for_request(request_id)]
+    return [_quote_response(request, quote, suppliers) for quote in QuoteRepository(session).list_for_request(request_id)]
 
 
 def _quote_response(
-    quote: SupplierQuote, suppliers: dict[str, Supplier]
+    request: SourcingRequest, quote: SupplierQuote, suppliers: dict[str, Supplier]
 ) -> SupplierQuoteRead:
+    ineligibility_reasons = quote_ineligibility_reasons(request, quote)
     return SupplierQuoteRead(
         id=quote.id, sourcing_request_id=quote.sourcing_request_id,
         supplier_id=quote.supplier_id, supplier_name=suppliers[quote.supplier_id].name,
@@ -392,6 +481,8 @@ def _quote_response(
         pickup_available_today=quote.pickup_available_today,
         delivery_eta=quote.delivery_eta, quote_valid_until=quote.quote_valid_until,
         supplier_notes=quote.supplier_notes, created_at=quote.created_at,
+        eligible=not ineligibility_reasons,
+        ineligibility_reasons=ineligibility_reasons,
     )
 
 

@@ -103,12 +103,14 @@ def test_demo_ranking_is_explainable_and_deterministic(client: TestClient) -> No
     assert [item["supplier_name"] for item in result["ranking"]] == [
         "Supplier A",
         "Supplier B",
-        "Supplier C",
     ]
     assert result["recommended_supplier_name"] == "Supplier A"
     assert "meets the required deadline" in result["explanation"]
     assert "Misses the required deadline." in result["ranking"][1]["reasons"]
-    assert "Exact requested reference is not confirmed." in result["ranking"][2]["reasons"]
+    quotes = client.get(f"/api/v1/sourcing-requests/{request_id}/quotes").json()
+    supplier_c = next(quote for quote in quotes if quote["supplier_name"] == "Supplier C")
+    assert supplier_c["eligible"] is False
+    assert "Exact requested reference is not confirmed." in supplier_c["ineligibility_reasons"]
 
 
 def test_approval_does_not_call_calle_sdk(monkeypatch, client: TestClient) -> None:

@@ -64,13 +64,31 @@ A controlled production call to the official CALL-E US hackathon test hotline re
 
 ## Demo flow for judges
 
-1. Open the frontend and create the Renault Clio alternator request.
-2. Review the bounded context and supplier-call preview.
-3. Approve the supplier calls at the explicit human gate.
-4. Review normalized quotes and the deterministic ranking.
-5. Select a supplier and inspect the separate reservation approval gate.
+1. Open the frontend and create the prefilled Renault Clio alternator demo request.
+2. Review the bounded context, its general/reference-specific scope, and the fictional supplier-call preview.
+3. Approve simulated quote requests at the explicit human gate. This never invokes CALL-E.
+4. Review all normalized offers; unconfirmed or unavailable offers remain visible but cannot be ranked or selected.
+5. Select an eligible supplier, review the separate reservation approval, and complete the fictional reservation.
+6. Return to the overview to resume the most recent request, or paste any request ID.
 
-Use fake mode for a repeatable demo without placing real calls.
+The portfolio UI creates requests through the isolated `/api/v1/demo/sourcing-requests` endpoint. Demo identity is persisted in the audit trail, so every later quote and reservation operation for that request remains on the fake provider even when the deployment is configured for CALL-E.
+The backend also defaults to `PORTFOLIO_DEMO_ONLY=true`, which blocks real CALL-E dispatch even if live-provider settings are accidentally present. Demo request creation is throttled per client as a lightweight abuse safeguard.
+
+### What remains simulated
+
+- Supplier identities, quote facts, prices, availability, warranties, and reservation references are fictional fixtures.
+- The demo performs no phone call, payment, purchase, or external network operation.
+- The hardcoded quote fixture is exact only for `TEST-ALT-CLIO-2019-001`. A custom reference produces no false exact match and may correctly yield no eligible quote.
+- Reference-specific knowledge is included only when its reference matches the request; general procurement policy remains available independently.
+
+### Production limitations
+
+- Real CALL-E requests remain separately guarded by server-side mode, live-enable, recipient allowlist, E.164, approval, and idempotency checks.
+- This portfolio build has no user-account authorization. It is suitable only for fictional demo data; production procurement would require authenticated users, tenant isolation, durable distributed rate limiting, and a retention policy.
+- The included demo throttle is process-local. Configure an edge or gateway rate limit before exposing a horizontally scaled deployment.
+- Fictional requests persist in the configured database until they are removed by an operator; automated retention is not implemented.
+- CALL-E completion is polled by the backend; there is no background worker or webhook-driven refresh in this demo architecture.
+- The resume shortcut is browser-local. A request can always be reopened directly when its ID is known.
 
 ## Local setup
 
@@ -89,6 +107,9 @@ Create `backend/.env` with placeholder or local-only values:
 APP_ENV=development
 CORS_ALLOWED_ORIGINS=http://localhost:3000
 DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:<port>/<database>
+PORTFOLIO_DEMO_ONLY=true
+DEMO_CREATE_RATE_LIMIT=10
+DEMO_CREATE_RATE_WINDOW_SECONDS=3600
 RAG_MODE=disabled
 RAG_EMBEDDING_PROVIDER=fastembed
 RAG_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5

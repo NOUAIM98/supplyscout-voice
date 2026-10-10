@@ -70,6 +70,7 @@ def live_app(monkeypatch, client: TestClient):
     )
     monkeypatch.setattr(routes, "provider", provider)
     monkeypatch.setattr(routes.settings, "call_provider_mode", "calle")
+    monkeypatch.setattr(routes.settings, "portfolio_demo_only", False)
     monkeypatch.setattr(routes.settings, "calle_live_enabled", True)
     monkeypatch.setattr(routes.settings, "calle_allowed_recipients", ",".join(s.phone_e164 for s in suppliers))
     monkeypatch.setattr(routes.settings, "calle_recipient_region", "US")
@@ -79,9 +80,20 @@ def live_app(monkeypatch, client: TestClient):
 
 def test_fake_and_live_guards_default_closed() -> None:
     settings = Settings(_env_file=None)
+    assert settings.portfolio_demo_only is True
     assert settings.call_provider_mode == "fake"
     assert settings.calle_live_enabled is False
     assert settings.allowed_calle_recipients == frozenset()
+
+
+def test_portfolio_mode_blocks_live_calls_before_other_guards(
+    live_app, db_session
+) -> None:
+    request_id, suppliers, _ = live_app
+    request = db_session.get(SourcingRequest, request_id)
+    protected = routes.settings.model_copy(update={"portfolio_demo_only": True})
+    with pytest.raises(LiveCallBlocked, match="portfolio deployment"):
+        assert_live_call_allowed(db_session, protected, request, suppliers[0], "quote")
 
 
 @pytest.mark.parametrize(

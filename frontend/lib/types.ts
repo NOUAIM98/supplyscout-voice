@@ -33,6 +33,16 @@ export interface WorkflowState {
   errors: string[];
 }
 
+export interface QuoteCallPreview extends WorkflowState {
+  call_preview: {
+    demo_mode: boolean;
+    requested_reference: string;
+    quantity: number;
+    supplier_count: number;
+    supplier_names: string[];
+  };
+}
+
 export type ReservationOutcome = "pending_approval" | "calling" | "confirmed" | "refused" | "unavailable" | "unclear" | "no_answer" | "failed";
 
 export interface ReservationResult {
@@ -69,6 +79,7 @@ export interface KnowledgeChunk {
   source_type: string;
   source_ref: string;
   snippet: string;
+  scope: "reference_specific" | "general";
 }
 
 export interface ContextPreview {
@@ -96,6 +107,8 @@ export interface SupplierQuote {
   delivery_eta: string | null;
   quote_valid_until: string | null;
   supplier_notes: string | null;
+  eligible: boolean;
+  ineligibility_reasons: string[];
 }
 
 export interface RankingEntry {

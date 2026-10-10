@@ -47,7 +47,6 @@ def test_quote_approval_ranks_without_selecting(client: TestClient) -> None:
     assert [item["supplier_name"] for item in ranking["ranking"]] == [
         "Supplier A",
         "Supplier B",
-        "Supplier C",
     ]
 
 

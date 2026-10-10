@@ -26,14 +26,17 @@ const fields: Array<{ key: keyof SourcingRequestInput; label: string; type?: str
 export function NewRequestForm() {
   const router = useRouter();
   const [form, setForm] = useState(initial);
-  const mutation = useMutation({ mutationFn: api.createRequest, onSuccess: (request) => router.push(`/requests/${request.id}`) });
+  const mutation = useMutation({ mutationFn: api.createDemoRequest, onSuccess: (request) => {
+    window.localStorage.setItem("supplyscout:last-request-id", request.id);
+    router.push(`/requests/${request.id}`);
+  } });
   function submit(event: FormEvent) { event.preventDefault(); mutation.mutate(form); }
   return <form onSubmit={submit} className="space-y-8">
     {mutation.error && <Alert>{mutation.error.message}</Alert>}
     <fieldset className="space-y-4"><legend className="mb-4 text-lg font-semibold">Vehicle</legend><div className="field-grid">{fields.slice(0, 3).map(field => <Field key={field.key} field={field} form={form} setForm={setForm} />)}</div></fieldset>
     <fieldset className="space-y-4 border-t pt-7"><legend className="mb-4 text-lg font-semibold">Part</legend><div className="field-grid">{fields.slice(3, 6).map(field => <Field key={field.key} field={field} form={form} setForm={setForm} />)}</div></fieldset>
     <fieldset className="space-y-4 border-t pt-7"><legend className="mb-4 text-lg font-semibold">Constraints</legend><div className="field-grid">{fields.slice(6).map(field => <Field key={field.key} field={field} form={form} setForm={setForm} />)}</div></fieldset>
-    <div className="flex items-center justify-between gap-4 border-t pt-6"><p className="text-sm text-muted-foreground">You will review context and the call brief before approving supplier calls.</p><Button type="submit" size="lg" disabled={mutation.isPending}>{mutation.isPending ? "Creating…" : "Create request"}<ArrowRight className="size-4" /></Button></div>
+    <div className="flex items-center justify-between gap-4 border-t pt-6"><p className="text-sm text-muted-foreground">Safe simulated demo: no real calls or charges. You will review the call brief before approval.</p><Button type="submit" size="lg" disabled={mutation.isPending}>{mutation.isPending ? "Creating…" : "Create demo request"}<ArrowRight className="size-4" /></Button></div>
   </form>;
 }
 

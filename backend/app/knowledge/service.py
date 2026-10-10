@@ -10,6 +10,17 @@ from .embeddings import (
 )
 from .repository import FakeKnowledgeRepository, KnowledgeRepository
 
+REFERENCE_BY_SOURCE = {
+    "demo:clio:reference:v1": "TEST-ALT-CLIO-2019-001",
+    "demo:clio:substitution:v1": "TEST-ALT-CLIO-2019-001",
+}
+
+
+def _chunk_reference(chunk: KnowledgeChunk) -> str | None:
+    return chunk.metadata_json.get("requested_reference") or REFERENCE_BY_SOURCE.get(
+        chunk.source_ref
+    )
+
 
 class ProcurementKnowledgeRetriever:
     def __init__(self, repository: KnowledgeRepository, embeddings: EmbeddingProvider,
@@ -24,7 +35,14 @@ class ProcurementKnowledgeRetriever:
         query = (f"{request.vehicle_make} {request.vehicle_model} {request.vehicle_year} "
                  f"{request.part_name} {request.requested_reference or ''} "
                  f"exact reference substitution policy quote collection {sourcing_context}")
-        return self.repository.search_similar(self.embeddings.embed_query(query), self.top_k)
+        candidates = self.repository.search_similar(
+            self.embeddings.embed_query(query), min(5, self.top_k + 2)
+        )
+        return [
+            chunk for chunk in candidates
+            if not _chunk_reference(chunk)
+            or _chunk_reference(chunk) == request.requested_reference
+        ][:self.top_k]
 
 
 def build_retriever(session: Session, embeddings: EmbeddingProvider | None = None):
@@ -47,7 +65,9 @@ def build_retriever(session: Session, embeddings: EmbeddingProvider | None = Non
 
 def provenance(chunks: list[KnowledgeChunk]) -> list[dict[str, str]]:
     return [{"id": c.id, "source_type": c.source_type, "source_ref": c.source_ref,
-             "title": c.title, "snippet": c.content[:240]} for c in chunks]
+             "title": c.title, "snippet": c.content[:240],
+             "scope": "reference_specific" if _chunk_reference(c) else "general"}
+            for c in chunks]
 
 
 def load_context(session: Session, ids: list[str]) -> list[KnowledgeChunk]:

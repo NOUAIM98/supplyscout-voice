@@ -25,6 +25,8 @@ def assert_live_call_allowed(
     supplier: Supplier,
     action_type: str,
 ) -> None:
+    if settings.portfolio_demo_only:
+        raise LiveCallBlocked("Live calls are disabled for the portfolio deployment")
     if settings.call_provider_mode != "calle":
         raise LiveCallBlocked("Live call provider is not selected")
     if not settings.calle_live_enabled:

@@ -31,12 +31,22 @@ class FakeCallProvider:
         self, sourcing_request: SourcingRequest, supplier: Supplier, *, knowledge_context: str = ""
     ) -> SupplierQuote:
         fixtures = self._quote_fixtures()
+        values = dict(fixtures[supplier.name])
+        if sourcing_request.requested_reference.casefold() != REFERENCE.casefold():
+            values.update(
+                exact_reference_confirmed=(
+                    "no" if values.get("offered_reference") == REFERENCE else "unknown"
+                ),
+                supplier_notes=(
+                    "The fictional fixture does not confirm the requested reference."
+                ),
+            )
         return SupplierQuote(
             id=str(uuid5(NAMESPACE_URL, f"{sourcing_request.id}:{supplier.id}")),
             sourcing_request_id=sourcing_request.id,
             supplier_id=supplier.id,
             created_at=datetime.now(timezone.utc),
-            **fixtures[supplier.name],
+            **values,
         )
 
     def create_reservation_call(

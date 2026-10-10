@@ -10,6 +10,7 @@ import { ApprovalPanel } from "@/components/workflow/approval-panel";
 import { ReservationPanel, ReservationStage } from "@/components/workflow/reservation-panel";
 import { AgentActivity } from "@/components/workflow/agent-activity";
 import { ContextPanel } from "@/components/sourcing/context-panel";
+import { ResumeRequest } from "@/components/sourcing/resume-request";
 import { CallProgress, RuntimeBadge, allCallsTerminal, hasActiveCalls } from "@/components/workflow/call-progress";
 import { queryClientDefaults } from "@/providers/query-provider";
 import type { RankingResponse, SourcingRequest, SupplierQuote } from "@/lib/types";
@@ -21,7 +22,8 @@ const quote = (overrides: Partial<SupplierQuote> = {}): SupplierQuote => ({
   offered_reference: "TEST-ALT-CLIO-2019-001", in_stock: "yes", manufacturer_or_brand: null,
   condition: "new", quantity_available: 1, unit_price: "145.00", currency: "EUR",
   tax_included: "unknown", warranty_months: 12, pickup_available_today: "yes",
-  delivery_eta: null, quote_valid_until: null, supplier_notes: null, ...overrides,
+  delivery_eta: null, quote_valid_until: null, supplier_notes: null,
+  eligible: true, ineligibility_reasons: [], ...overrides,
 });
 
 describe("Phase G1 live progress", () => {
@@ -62,11 +64,12 @@ describe("Phase G1 live progress", () => {
 
 describe("Phase E3 semantic context", () => {
   it("renders safe context provenance cards", () => {
-    render(<ContextPanel context={{ mode: "postgres", call_started: false, task_context: "safe", chunks: [{ id: "k1", title: "Compatibility confirmation policy", source_type: "vehicle_compatibility", source_ref: "demo:compatibility", snippet: "Confirm the exact reference with the supplier." }] }} />);
+    render(<ContextPanel context={{ mode: "postgres", call_started: false, task_context: "safe", chunks: [{ id: "k1", title: "Compatibility confirmation policy", source_type: "vehicle_compatibility", source_ref: "demo:compatibility", snippet: "Confirm the exact reference with the supplier.", scope: "general" }] }} />);
     expect(screen.getByText("Compatibility confirmation policy")).toBeVisible();
     expect(screen.getByText("vehicle compatibility")).toBeVisible();
     expect(screen.getByText("Confirm the exact reference with the supplier.")).toBeVisible();
     expect(screen.getByText("demo:compatibility")).toBeVisible();
+    expect(screen.getByText("General policy")).toBeVisible();
   });
 });
 
@@ -86,7 +89,7 @@ describe("Phase F1 sourcing flow", () => {
     withQuery(<NewRequestForm />);
     expect(screen.getByLabelText("Make")).toHaveValue("Renault");
     expect(screen.getByLabelText("Requested reference")).toHaveValue("TEST-ALT-CLIO-2019-001");
-    expect(screen.getByRole("button", { name: /create request/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /create demo request/i })).toBeEnabled();
   });
 
   it("renders the current workflow without marking supplier calls complete", () => {
@@ -97,19 +100,27 @@ describe("Phase F1 sourcing flow", () => {
 
   it("requires an explicit approval click", async () => {
     const onApprove = vi.fn();
-    render(<ApprovalPanel ready pending={false} onApprove={onApprove} />);
+    render(<ApprovalPanel ready pending={false} reference="TEST-ALT-CLIO-2019-001" quantity={1} supplierNames={["Supplier A", "Supplier B", "Supplier C"]} onApprove={onApprove} />);
     expect(onApprove).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /approve supplier quote calls/i }));
+    expect(screen.getByText("TEST-ALT-CLIO-2019-001")).toBeVisible();
+    expect(screen.getByText("Supplier A, Supplier B, Supplier C")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /approve simulated quote requests/i }));
     expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  it("restores the most recent request ID for navigation", () => {
+    window.localStorage.setItem("supplyscout:last-request-id", "request-123");
+    render(<ResumeRequest />);
+    expect(screen.getByLabelText("Resume a request")).toHaveValue("request-123");
   });
 
   it("keeps unknown facts visible and selection manual", async () => {
     const onSelect = vi.fn();
-    render(<QuoteComparison quotes={[quote({ in_stock: "unknown", warranty_months: null, delivery_eta: null })]} selectedQuoteId={null} selectionAllowed onSelect={onSelect} />);
+    render(<QuoteComparison quotes={[quote({ in_stock: "unknown", warranty_months: null, delivery_eta: null, eligible: false, ineligibility_reasons: ["Required quantity is not confirmed in stock."] })]} selectedQuoteId={null} selectionAllowed onSelect={onSelect} />);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThanOrEqual(3);
     expect(onSelect).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Select this supplier" }));
-    expect(onSelect).toHaveBeenCalledWith("q1");
+    expect(screen.getByRole("button", { name: "Ineligible offer" })).toBeDisabled();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("renders backend ranking without automatically selecting its recommendation", () => {

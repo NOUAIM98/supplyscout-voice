@@ -28,6 +28,8 @@ class SupplierQuoteRead(BaseModel):
     delivery_eta: str | None
     quote_valid_until: str | None
     supplier_notes: str | None
+    eligible: bool
+    ineligibility_reasons: list[str]
     created_at: datetime
 
 

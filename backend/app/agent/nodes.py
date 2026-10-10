@@ -137,6 +137,15 @@ class ProcurementNodes:
         quotes = self.quotes.list_for_request(request.id)
         suppliers = {supplier.id: supplier for supplier in self.suppliers.assigned_to(request.id)}
         ranking = [item.quote.id for item in rank_quotes(request, quotes, suppliers)]
+        if not ranking:
+            request.status = "awaiting_human_selection"
+            self.audit.record(request.id, "no_valid_quote")
+            return {
+                "workflow_status": "awaiting_human_selection",
+                "ranking": [],
+                "recommended_quote_id": None,
+                "errors": ["No eligible supplier quote is available."],
+            }
         request.status = "ranked"
         self.audit.record(request.id, "recommendation_generated", {"quote_id": ranking[0]})
         return {"workflow_status": "ranked", "ranking": ranking, "recommended_quote_id": ranking[0]}

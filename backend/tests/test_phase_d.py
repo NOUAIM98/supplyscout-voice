@@ -53,7 +53,7 @@ def test_ranking_reads_persisted_quotes(client: TestClient) -> None:
     response = client.get(f"/api/v1/sourcing-requests/{request_id}/ranking")
 
     assert [item["supplier_name"] for item in response.json()["ranking"]] == [
-        "Supplier A", "Supplier B", "Supplier C"
+        "Supplier A", "Supplier B"
     ]
 
 

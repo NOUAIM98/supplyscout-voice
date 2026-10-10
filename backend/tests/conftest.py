@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from backend.app.db.base import Base
 from backend.app.db.session import get_db
 from backend.app.main import app
+from backend.app.api import routes
 
 
 engine = create_engine(
@@ -28,7 +29,8 @@ def override_get_db():
 
 
 @pytest.fixture(autouse=True)
-def isolated_database() -> None:
+def isolated_database(monkeypatch) -> None:
+    monkeypatch.setattr(routes.settings, "portfolio_demo_only", False)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     app.dependency_overrides[get_db] = override_get_db

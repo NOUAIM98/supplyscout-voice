@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, FileSearch, PhoneCall, Scale, ShieldCheck } from "lucide-react";
+import { ResumeRequest } from "@/components/sourcing/resume-request";
 
 const steps = [
   ["01", "Request", "Define the exact part and constraints."],
@@ -17,6 +18,7 @@ export default function Home() {
         <h1 className="text-5xl font-semibold leading-[1.04] tracking-[-.045em] sm:text-6xl">Turn supplier phone calls into structured procurement decisions.</h1>
         <p className="mt-7 max-w-2xl text-lg leading-8 text-muted-foreground">SupplyScout calls approved suppliers, collects live quote information, and turns conversations into comparable structured offers.</p>
         <Link href="/requests/new" className="mt-9 inline-flex h-12 items-center gap-2 rounded-md bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90">New sourcing request <ArrowRight className="size-4" /></Link>
+        <ResumeRequest />
       </div>
       <div className="relative overflow-hidden rounded-2xl border bg-foreground p-7 text-background shadow-xl shadow-slate-900/10">
         <div className="absolute right-0 top-0 h-36 w-36 rounded-bl-full bg-primary/70" />

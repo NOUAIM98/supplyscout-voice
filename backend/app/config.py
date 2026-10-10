@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     rag_embedding_cache_dir: str | None = None
     database_url: str | None = None
+    portfolio_demo_only: bool = True
+    demo_create_rate_limit: int = Field(default=10, gt=0)
+    demo_create_rate_window_seconds: int = Field(default=3600, gt=0)
     call_provider_mode: Literal["fake", "calle"] = "fake"
     calle_api_key: str | None = None
     calle_base_url: str = "https://api.heycall-e.com"

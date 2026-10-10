@@ -19,6 +19,7 @@ from backend.app.knowledge.service import (
     ProcurementKnowledgeRetriever, build_retriever, compose_quote_context, provenance,
 )
 from backend.tests.test_phase_a import create_request, approve_quotes
+from backend.tests.test_phase_a import DEMO_REQUEST
 
 
 @pytest.fixture(autouse=True)
@@ -76,13 +77,40 @@ def test_reference_substitution_provenance_and_limit(knowledge, client):
     assert len(data["chunks"]) == 4
     types = {c["source_type"] for c in data["chunks"]}
     assert {"part_reference_note", "substitution_rule"} <= types
-    assert all(set(c) == {"id", "title", "source_type", "source_ref", "snippet"} for c in data["chunks"])
+    assert all(set(c) == {"id", "title", "source_type", "source_ref", "snippet", "scope"} for c in data["chunks"])
+    assert {c["scope"] for c in data["chunks"]} == {"reference_specific", "general"}
     assert "embedding" not in json.dumps(data)
     assert "supplier has stock" not in data["task_context"]
     assert "145" not in data["task_context"]
     assert "Unknown stays unknown" in data["task_context"]
     assert client.get(f"/api/v1/sourcing-requests/{request_id}/quotes").json() == []
     assert client.get(f"/api/v1/sourcing-requests/{request_id}/workflow").json()["workflow_status"] == "request_created"
+
+
+def test_custom_reference_excludes_reference_specific_context_and_has_no_valid_quote(
+    knowledge, client
+):
+    payload = {**DEMO_REQUEST, "requested_reference": "CUSTOM-REFERENCE-999"}
+    created = client.post("/api/v1/demo/sourcing-requests", json=payload)
+    request_id = created.json()["id"]
+
+    context = client.post(
+        f"/api/v1/sourcing-requests/{request_id}/context-preview"
+    ).json()
+    assert context["chunks"]
+    assert all(chunk["scope"] == "general" for chunk in context["chunks"])
+    assert "TEST-ALT-CLIO-2019-001" not in context["task_context"]
+
+    quotes = client.post(
+        f"/api/v1/sourcing-requests/{request_id}/approve-quote-calls"
+    ).json()
+    assert all(quote["exact_reference_confirmed"] != "yes" for quote in quotes)
+    assert all(quote["eligible"] is False for quote in quotes)
+    assert client.get(f"/api/v1/sourcing-requests/{request_id}/ranking").status_code == 409
+    assert client.post(
+        f"/api/v1/sourcing-requests/{request_id}/select-quote",
+        json={"quote_id": quotes[0]["id"]},
+    ).status_code == 409
 
 
 @pytest.mark.parametrize("limit", [1, 3, 5])

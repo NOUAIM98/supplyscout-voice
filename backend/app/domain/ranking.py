@@ -18,7 +18,7 @@ def rank_quotes(
     suppliers: dict[str, Supplier],
 ) -> list[RankedQuote]:
     ordered = sorted(
-        quotes,
+        [quote for quote in quotes if not quote_ineligibility_reasons(sourcing_request, quote)],
         key=lambda quote: (
             {"yes": 0, "unknown": 1, "no": 2}[quote.exact_reference_confirmed],
             _deadline_rank(sourcing_request, quote),
@@ -35,6 +35,23 @@ def rank_quotes(
         )
         for quote in ordered
     ]
+
+
+def quote_ineligibility_reasons(
+    sourcing_request: SourcingRequest, quote: SupplierQuote
+) -> list[str]:
+    reasons = []
+    if quote.exact_reference_confirmed != "yes":
+        reasons.append("Exact requested reference is not confirmed.")
+    if not quote.offered_reference or (
+        quote.offered_reference.casefold() != sourcing_request.requested_reference.casefold()
+    ):
+        reasons.append("Offered reference does not match the requested reference.")
+    if quote.in_stock != "yes":
+        reasons.append("Required quantity is not confirmed in stock.")
+    if quote.quantity_available is not None and quote.quantity_available < sourcing_request.quantity:
+        reasons.append("Available quantity is below the requested quantity.")
+    return reasons
 
 
 def _fulfillment_date(quote: SupplierQuote) -> date | None:
